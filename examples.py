@@ -1,10 +1,8 @@
 import numpy as np
+import PySpice.Unit as unit
 import matplotlib.pyplot as plt
-from PySpice.Doc.ExampleTools import find_libraries
-from PySpice.Probe.Plot import plot
 from PySpice.Spice.Library import SpiceLibrary
 from PySpice.Spice.Netlist import Circuit
-from PySpice.Unit import *
 
 import PySpice.Logging.Logging as Logging
 logger = Logging.setup_logging()
@@ -21,10 +19,10 @@ def plot_npn_bjt_curves(component: str) -> None:
 
     circuit = Circuit('Transistor')
 
-    Vbase = circuit.V('base', '1', circuit.gnd, 1@u_V)
-    circuit.R('base', 1, 'base', 1@u_kΩ)
-    Vcollector = circuit.V('collector', '2', circuit.gnd, 0@u_V)
-    circuit.R('collector', 2, 'collector', 1@u_kΩ)
+    Vbase = circuit.V('base', '1', circuit.gnd, 1@unit.u_V)
+    circuit.R('base', 1, 'base', 1@unit.u_kΩ)
+    Vcollector = circuit.V('collector', '2', circuit.gnd, 0@unit.u_V)
+    circuit.R('collector', 2, 'collector', 1@unit.u_kΩ)
     # circuit.BJT(1, 'collector', 'base', circuit.gnd, model='generic')
     # circuit.model('generic', 'npn')
     circuit.include(spice_library[component])
@@ -34,7 +32,7 @@ def plot_npn_bjt_curves(component: str) -> None:
     simulator = circuit.simulator(temperature=25, nominal_temperature=25)
     analysis = simulator.dc(Vbase=slice(0, 3, .01))
 
-    ax1.plot(analysis.base, u_mA(-analysis.Vbase)) # Fixme: I_Vbase
+    ax1.plot(analysis.base, unit.u_mA(-analysis.Vbase)) # Fixme: I_Vbase
     ax1.axvline(x=.65, color='red')
     ax1.legend(('Base-Emitter Diode curve',), loc=(.1,.8))
     ax1.grid()
@@ -42,7 +40,7 @@ def plot_npn_bjt_curves(component: str) -> None:
     ax1.set_ylabel('Ib [mA]')
 
     circuit = Circuit('Transistor')
-    Ibase = circuit.I('base', circuit.gnd, 'base', 10@u_uA) # take care to the orientation
+    Ibase = circuit.I('base', circuit.gnd, 'base', 10@unit.u_uA) # take care to the orientation
     Vcollector = circuit.V('collector', 'collector', circuit.gnd, 5)
     # circuit.BJT(1, 'collector', 'base', circuit.gnd, model='generic')
     # circuit.model('generic', 'npn')
@@ -62,13 +60,13 @@ def plot_npn_bjt_curves(component: str) -> None:
     ax3.axvline(x=.2, color='red')
 
     for base_current in np.arange(0, 100, 10):
-        base_current = base_current@u_uA
+        base_current = base_current@unit.u_uA
         Ibase.dc_value = base_current
         simulator = circuit.simulator(temperature=25, nominal_temperature=25)
         analysis = simulator.dc(Vcollector=slice(0, 5, .01))
         # add ib as text, linear and saturate region
         # Plot Ic = f(Vce)
-        ax2.plot(analysis.collector, u_mA(-analysis.Vcollector))
+        ax2.plot(analysis.collector, unit.u_mA(-analysis.Vcollector))
         # Plot β = Ic / Ib = f(Vce)
         ax3.plot(analysis.collector, -analysis.Vcollector/float(base_current))
         # trans-resistance U = RI   R = U / I = Vce / Ie
@@ -82,7 +80,7 @@ def plot_npn_bjt_curves(component: str) -> None:
     simulator = circuit.simulator(temperature=25, nominal_temperature=25)
     analysis = simulator.dc(Ibase=slice(0, 100e-6, 10e-6))
     # Fixme: sweep
-    ax4.plot(analysis.sweep*1e6, u_mA(-analysis.Vcollector), 'o-')
+    ax4.plot(analysis.sweep*1e6, unit.u_mA(-analysis.Vcollector), 'o-')
     ax4.legend(('Ic(Ib)',), loc=(.1,.8))
 
     plt.tight_layout()
