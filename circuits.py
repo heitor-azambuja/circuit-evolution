@@ -6,24 +6,26 @@ import PySpice.Logging.Logging as Logging
 logger = Logging.setup_logging()
 
 
-class BJT_Amp:
-	def __init__(self, sin_dc_offset=0, sin_ampl=0.01, sin_freq=1000, vcc=3.3, ckt_name='BJT Class 1 Amplifier') -> None:
+class BJTClassAAmp:
+	def __init__(self, sin_dc_offset=0, sin_ampl=0.01, sin_freq=1000, vcc=3.3, ckt_name='BJT Class 1 Amplifier', load=10000) -> None:
 		circuit = Circuit(ckt_name)
 		
 		circuit.V('cc', 1, circuit.gnd, vcc@unit.u_V)
 		circuit.SinusoidalVoltageSource('s', 'in', circuit.gnd, 
 								  		dc_offset=sin_dc_offset@unit.u_V,
 										amplitude=sin_ampl@unit.u_V, 
-										fequency=sin_freq@unit.u_Hz)
+										frequency=sin_freq@unit.u_Hz)
 
 		circuit.R(1, 1, 3)
 		circuit.R(2, 3, circuit.gnd)
 		circuit.R('c', 1, 4)
 		circuit.R('e', 5, circuit.gnd)
+		circuit.R('l', 'out', circuit.gnd, load@unit.u_Ohm)
 		
-		circuit.C('in', 3, 'in')
+		# circuit.C('i', 3, 'in')
+		circuit.C('i', 'in', 3)
 		circuit.C('e', 5, circuit.gnd)
-		circuit.C('out', 4, 'out')
+		circuit.C('o', 4, 'out')
 
 		spice_library = SpiceLibrary('.')
 		circuit.include(spice_library['bc547b'])
@@ -46,21 +48,24 @@ class BJT_Amp:
 		'''
 			Configure circuit Capacitors capacitance in uF
 		'''
-		self.circuit.Cin.capacitance = cin@unit.u_uF
+		self.circuit.Ci.capacitance = cin@unit.u_uF
 		self.circuit.Ce.capacitance = ce@unit.u_uF
-		self.circuit.Cout.capacitance = cout@unit.u_uF
+		self.circuit.Co.capacitance = cout@unit.u_uF
 
 
 	def configure_vcc(self, vcc=3.3) -> None:
 		self.circuit.Vcc.dc_value = vcc@unit.u_V
 
 
-	def configure_input_signal(self, ampl=1, dc_offset=0, freq=1000) -> None:
+	def configure_input_signal(self, ampl=0.01, dc_offset=0, freq=1000) -> None:
 		self.circuit.Vs.amplitude = ampl@unit.u_V
 		self.circuit.Vs.dc_offset = dc_offset@unit.u_V
 		self.circuit.frequency = freq@unit.u_Hz
 
 	
-	def transient_analysis(self, step_time=0.0001, end_time=0.1) -> object:
+	def transient_analysis(self, step_time=0.00001, end_time=0.002) -> object:
 		simulator = self.circuit.simulator(temperature=25, nominal_temperature=25)
 		return simulator.transient(step_time=step_time, end_time=end_time)
+	
+
+# class SallenKeyFilter:
