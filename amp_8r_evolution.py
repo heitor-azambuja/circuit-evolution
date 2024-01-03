@@ -52,7 +52,7 @@ def plot_solution(solution) -> None:
 	plt.show()
 
 
-if __name__ == "__main__":
+def evolve():
 	ga_instance = pygad.GA(num_generations=100,
 						   num_parents_mating=4,
 						   fitness_func=bjt_amp_fitness_func,
@@ -80,3 +80,7 @@ if __name__ == "__main__":
 	
 	ga_instance.plot_fitness(linewidth=2, color='#1f77b4', font_size=12)  #save_dir='')
 	plot_solution(solution)
+
+
+if __name__ == "__main__":
+	evolve()
