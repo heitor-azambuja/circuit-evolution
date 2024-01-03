@@ -34,14 +34,18 @@ class BJTClassAAmp:
 		self.circuit = circuit
 
 
-	def configure_resistors(self, r1, r2, rc, re) -> None:
+	def configure_resistors(self, values) -> None:
 		'''
-			Configure circuit Resistors resistance in Ohms
+			Configure circuit Resistors resistance in Ohms.
+			The order is: R1, R2, Rc, Re
 		'''
-		self.circuit.R1.resistance = r1@unit.u_Ohm
-		self.circuit.R2.resistance = r2@unit.u_Ohm
-		self.circuit.Rc.resistance = rc@unit.u_Ohm
-		self.circuit.Re.resistance = re@unit.u_Ohm
+		if len(values) != 4:
+			raise ValueError('4 resistors values are required!')
+		
+		self.circuit.R1.resistance = values[0]@unit.u_Ohm
+		self.circuit.R2.resistance = values[1]@unit.u_Ohm
+		self.circuit.Rc.resistance = values[2]@unit.u_Ohm
+		self.circuit.Re.resistance = values[3]@unit.u_Ohm
 
 
 	def configure_capacitors(self, cin, ce, cout) -> None:
@@ -100,18 +104,23 @@ class BJTClassAAmp8R(BJTClassAAmp):
 		self.circuit = circuit
 
 
-	def configure_resistors(self, r11, r12, r21, r22, rc1, rc2, re1, re2) -> None:
+	def configure_resistors(self, values) -> None:
 		'''
 			Configure circuit Resistors resistance in Ohms
+			The order is: R11, R12, R21, R22, Rc1, Rc2, Re1, Re2
 		'''
-		self.circuit.R11.resistance = r11@unit.u_Ohm
-		self.circuit.R12.resistance = r12@unit.u_Ohm
-		self.circuit.R21.resistance = r21@unit.u_Ohm
-		self.circuit.R22.resistance = r22@unit.u_Ohm
-		self.circuit.Rc1.resistance = rc1@unit.u_Ohm
-		self.circuit.Rc2.resistance = rc2@unit.u_Ohm
-		self.circuit.Re1.resistance = re1@unit.u_Ohm
-		self.circuit.Re2.resistance = re2@unit.u_Ohm
+		
+		if len(values) != 8:
+			raise ValueError('8 resistors values are required!')
+		
+		self.circuit.R11.resistance = values[0]@unit.u_Ohm
+		self.circuit.R12.resistance = values[1]@unit.u_Ohm
+		self.circuit.R21.resistance = values[2]@unit.u_Ohm
+		self.circuit.R22.resistance = values[3]@unit.u_Ohm
+		self.circuit.Rc1.resistance = values[4]@unit.u_Ohm
+		self.circuit.Rc2.resistance = values[5]@unit.u_Ohm
+		self.circuit.Re1.resistance = values[6]@unit.u_Ohm
+		self.circuit.Re2.resistance = values[7]@unit.u_Ohm
 
 
 # class SallenKeyFilter:

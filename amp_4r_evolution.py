@@ -16,7 +16,7 @@ def bjt_amp_fitness_func(ga_instance, solution, solution_idx) -> float:
 	for value in solution:
 		resistances.append(pot_100k.get_resistance(value))
 
-	amp.configure_resistors(resistances[0], resistances[1], resistances[2], resistances[3])
+	amp.configure_resistors(resistances)
 	analysis = amp.transient_analysis()
 	output = np.array(analysis.out)
 	desired = -desired_gain * np.array(analysis['in'])
@@ -30,7 +30,7 @@ def plot_solution(solution) -> None:
 	resistances = []
 	for value in solution:
 		resistances.append(pot_100k.get_resistance(value))
-	amp.configure_resistors(resistances[0], resistances[1], resistances[2], resistances[3])
+	amp.configure_resistors(resistances)
 	analysis = amp.transient_analysis()
 	output = 100 * np.array(analysis.out)
 	desired = 100 * (-desired_gain) * np.array(analysis['in'])
@@ -72,8 +72,8 @@ if __name__ == "__main__":
 	ga_instance.run()
 
 	solution, solution_fitness, solution_idx = ga_instance.best_solution()
-	print("Parameters of the best solution : {solution}".format(solution=solution))
-	print("Fitness value of the best solution = {solution_fitness}".format(solution_fitness=solution_fitness))
+	print(f'Parameters of the best solution : {solution}')
+	print(f'Fitness value of the best solution = {solution_fitness}')
 	
 	ga_instance.plot_fitness()
 	plot_solution(solution)
