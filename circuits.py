@@ -68,4 +68,50 @@ class BJTClassAAmp:
 		return simulator.transient(step_time=step_time, end_time=end_time)
 	
 
+class BJTClassAAmp8R(BJTClassAAmp):
+	def __init__(self, sin_dc_offset=0, sin_ampl=0.01, sin_freq=1000, vcc=3.3, ckt_name='BJT Class 1 Amplifier', load=10000) -> None:
+		circuit = Circuit(ckt_name)
+		
+		circuit.V('cc', 1, circuit.gnd, vcc@unit.u_V)
+		circuit.SinusoidalVoltageSource('s', 'in', circuit.gnd, 
+								  		dc_offset=sin_dc_offset@unit.u_V,
+										amplitude=sin_ampl@unit.u_V, 
+										frequency=sin_freq@unit.u_Hz)
+
+		circuit.R(11, 8, 3)
+		circuit.R(12, 1, 8)
+		circuit.R(21, 3, 7)
+		circuit.R(22, 7, circuit.gnd)
+		circuit.R('c1', 9, 4)
+		circuit.R('c2', 1, 9)
+		circuit.R('e1', 5, 6)
+		circuit.R('e2', 6, circuit.gnd)
+		
+		circuit.R('l', 'out', circuit.gnd, load@unit.u_Ohm)
+		
+		circuit.C('i', 'in', 3)
+		circuit.C('e', 5, circuit.gnd)
+		circuit.C('o', 4, 'out')
+
+		spice_library = SpiceLibrary('.')
+		circuit.include(spice_library['bc547b'])
+		circuit.BJT(1, 4, 3, 5, model='bc547b')  # (name, collector, base, emmiter, model)
+
+		self.circuit = circuit
+
+
+	def configure_resistors(self, r11, r12, r21, r22, rc1, rc2, re1, re2) -> None:
+		'''
+			Configure circuit Resistors resistance in Ohms
+		'''
+		self.circuit.R11.resistance = r11@unit.u_Ohm
+		self.circuit.R12.resistance = r12@unit.u_Ohm
+		self.circuit.R21.resistance = r21@unit.u_Ohm
+		self.circuit.R22.resistance = r22@unit.u_Ohm
+		self.circuit.Rc1.resistance = rc1@unit.u_Ohm
+		self.circuit.Rc2.resistance = rc2@unit.u_Ohm
+		self.circuit.Re1.resistance = re1@unit.u_Ohm
+		self.circuit.Re2.resistance = re2@unit.u_Ohm
+
+
 # class SallenKeyFilter:
