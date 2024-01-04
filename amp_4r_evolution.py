@@ -79,6 +79,5 @@ def evolve():
 	plot_solution(solution)
 
 
-
 if __name__ == "__main__":
 	evolve()

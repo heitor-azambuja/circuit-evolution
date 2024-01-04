@@ -87,4 +87,6 @@ def plot_npn_bjt_curves(component: str) -> None:
     plt.show()
 
 
-plot_npn_bjt_curves('2n2222a')
+if __name__ == "__main__":
+    plot_npn_bjt_curves('2n2222a')
+    plot_npn_bjt_curves('bc547b')
