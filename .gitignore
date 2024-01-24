@@ -1,5 +1,7 @@
-# ignove venv folder
-venv/
+# ignore images
+simulations/*.png
+simulations/*.jpg
+simulations/*.jpeg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
