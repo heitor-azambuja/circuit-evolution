@@ -3,8 +3,7 @@ from PySpice.Spice.Netlist import Circuit
 from PySpice.Spice.Library import SpiceLibrary
 
 import PySpice.Logging.Logging as Logging
-logger = Logging.setup_logging()
-
+logger = Logging.setup_logging(logging_level='ERROR')
 
 class BJTClassAAmp:
 	def __init__(self, sin_dc_offset=0, sin_ampl=0.01, sin_freq=1000, vcc=3.3, ckt_name='BJT Class 1 Amplifier', load=10000) -> None:
