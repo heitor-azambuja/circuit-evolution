@@ -14,6 +14,7 @@ import time
 # set non interactive matplotlib backend
 import matplotlib
 matplotlib.use('Agg')
+import argparse
 
 logger = logging.getLogger()
 # logger.setLevel(logging.WARNING)
@@ -41,6 +42,8 @@ circuit_name = 'bjt_class_a_amp_8r'
 data_csv = 'simulations/data.csv'
 data_json = {}
 ga_seed = None
+# Toggle automatic plot generation after runs. Set False to only save JSON/CSV.
+AUTO_PLOTS = False
 
 
 def bjt_amp_fitness_func(ga_instance, solution, solution_idx) -> float:
@@ -223,6 +226,15 @@ def evolve():
 
 	# Save per-generation fitness history so plots can be regenerated later
 	fitness_history_path = f'simulations/fitness_history_{circuit_name}_gain{desired_gain}_execution{exec_counter}.json'
+	hist = getattr(ga_instance, 'best_solutions_fitness', None)
+	if hist is None:
+		hist_list = []
+	elif hasattr(hist, 'tolist'):
+		hist_list = hist.tolist()
+	else:
+		# ensure serializable list
+		hist_list = list(hist)
+
 	with open(fitness_history_path, 'w') as fh:
 		json.dump({
 			'run_id': data_json.get('run_id', ''),
@@ -230,25 +242,52 @@ def evolve():
 			'desired_gain': desired_gain,
 			'exec_counter': exec_counter,
 			'seed': ga_seed,
-			'best_solutions_fitness': ga_instance.best_solutions_fitness.tolist(),
+			'best_solutions_fitness': hist_list,
 		}, fh)
 
 	logger.info(f'Parameters of the best solution : {solution}')
 	logger.info(f'Fitness value of the best solution = {solution_fitness}')
 	
-	fitness_path = f'simulations/fitness_{circuit_name}_gain{desired_gain}_execution{exec_counter}.png'
-	fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
-	ax.plot(ga_instance.best_solutions_fitness, linewidth=2, color='#1f77b4')
-	ax.set_xlabel('Generation', fontsize=11)
-	ax.set_ylabel('Fitness', fontsize=11)
-	ax.set_title(f'Fitness — {circuit_name} gain={desired_gain} exec={exec_counter}', fontsize=11)
-	ax.grid(True, linestyle=':', alpha=0.6)
-	fig.savefig(fitness_path, dpi=150, bbox_inches='tight')
-	plt.close(fig)
-	plot_solution(solution)
+	# Optionally generate plots (disabled by default to speed batch runs).
+	if AUTO_PLOTS:
+		fitness_path = f'simulations/fitness_{circuit_name}_gain{desired_gain}_execution{exec_counter}.png'
+		fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
+		ax.plot(ga_instance.best_solutions_fitness, linewidth=2, color='#1f77b4')
+		ax.set_xlabel('Generation', fontsize=11)
+		ax.set_ylabel('Fitness', fontsize=11)
+		ax.set_title(f'Fitness — {circuit_name} gain={desired_gain} exec={exec_counter}', fontsize=11)
+		ax.grid(True, linestyle=':', alpha=0.6)
+		fig.savefig(fitness_path, dpi=150, bbox_inches='tight')
+		plt.close(fig)
+		plot_solution(solution)
 
 
 if __name__ == "__main__":
+	parser = argparse.ArgumentParser(description='Run 8R GA experiments')
+	parser.add_argument('--plots', dest='plots', action='store_true', default=False,
+						help='Enable saving PNG plots after run')
+	parser.add_argument('-g', '--generations', type=int, help='Number of generations')
+	parser.add_argument('-p', '--population', type=int, help='Population size')
+	parser.add_argument('-r', '--repetitions', type=int, help='Repetitions per gain')
+	parser.add_argument('--exec-counter', type=int, help='Execution counter override')
+	parser.add_argument('--seed', type=int, help='RNG seed')
+	parser.add_argument('--gain', type=int, help='Run only for this gain')
+	args = parser.parse_args()
+
+	AUTO_PLOTS = bool(args.plots)
+	if args.generations:
+		generations = args.generations
+	if args.population:
+		population = args.population
+	if args.repetitions:
+		repetitions = args.repetitions
+	if args.exec_counter:
+		exec_counter = args.exec_counter
+	if args.seed:
+		ga_seed = args.seed
+		np.random.seed(ga_seed)
+	if args.gain:
+		desired_gain_list = [args.gain]
 	for gain in desired_gain_list:
 		for i in range(repetitions):
 			exec_counter = i + 1
