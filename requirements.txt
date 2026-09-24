@@ -3,3 +3,4 @@ scipy==1.17.1
 pygad==3.5.0
 PySpice==1.5
 matplotlib==3.10.8
+pytest==9.1.1

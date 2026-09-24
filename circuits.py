@@ -23,7 +23,6 @@ class BJTClassAAmp:
 		circuit.R('e', 5, circuit.gnd)
 		circuit.R('l', 'out', circuit.gnd, load@unit.u_Ohm)
 		
-		# circuit.C('i', 3, 'in')
 		circuit.C('i', 'in', 3)
 		circuit.C('e', 5, circuit.gnd)
 		circuit.C('o', 4, 'out')
@@ -128,6 +127,3 @@ class BJTClassAAmp8R(BJTClassAAmp):
 		self.circuit.Re1.resistance = _r[6]@unit.u_Ohm
 		self.circuit.Re2.resistance = _r[7]@unit.u_Ohm
 		self._resistors_configured = True
-
-
-# class SallenKeyFilter:

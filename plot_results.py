@@ -15,12 +15,11 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import numpy as np
 
 import circuits
-import components
 import data_parse
 import evaluate_sims
+import evolution_common
 
 
 # ---------------------------------------------------------------------------
@@ -50,41 +49,12 @@ def _get_resistances(row: dict, ckt_name: str):
         return None
 
 
-_STEP_TIME_FINE = 0.000005
-
-
-def _compute_waveform(amp, resistances: list, desired_gain: float) -> dict:
-    amp.configure_resistors(resistances)
-    analysis = amp.transient_analysis(step_time=_STEP_TIME_FINE)
-    output = 100 * np.array(analysis.out)
-    desired = 100 * (-desired_gain) * np.array(analysis['in'])
-    time_us = np.array(analysis.time) * 1_000_000
-
-    max_error_mv = float(np.max(np.abs(output - desired)))
-    avg_error_mv = float(np.mean(np.abs(output - desired)))
-
-    return {
-        'resistances': resistances,
-        'output': output,
-        'desired': desired,
-        'time_us': time_us,
-        'max_voltage': float(np.max(output)),
-        'min_voltage': float(np.min(output)),
-        'max_error': max_error_mv,
-        'max_error_percent': max_error_mv / desired_gain * 100,
-        'avg_error': avg_error_mv,
-        'avg_error_percent': avg_error_mv / desired_gain * 100,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Waveform plots
 # ---------------------------------------------------------------------------
 
 def regenerate_waveforms(rows: list, out_dir: str = 'simulations') -> None:
     print('=== Regenerating waveform plots ===')
-    pot_100k = components.DigitalPot(100_000, 100)
-    pot_10k  = components.DigitalPot(10_000, 100)
 
     for row in rows:
         ckt_name    = row.get('ckt_name', '')
@@ -99,54 +69,18 @@ def regenerate_waveforms(rows: list, out_dir: str = 'simulations') -> None:
 
         try:
             amp = _build_amp(ckt_name)
-            metrics = _compute_waveform(amp, resistances, desired_gain)
+            metrics = evolution_common.compute_metrics(amp, resistances, desired_gain)
         except Exception as exc:
             print(f'  [error] exec={exec_counter}: {exc}')
             continue
 
-        is_8r  = '8r' in ckt_name
-        label  = '(8R)' if is_8r else ''
-        t, out, des = metrics['time_us'], metrics['output'], metrics['desired']
-
-        fig, axes = plt.subplots(2, 1, figsize=(10, 7),
-                                 gridspec_kw={'height_ratios': [3, 1]},
-                                 constrained_layout=True)
-
-        ax = axes[0]
-        ax.plot(t, des, color='#2ca02c', linewidth=1.8, linestyle='--', label='desired', zorder=3)
-        ax.plot(t, out, color='#1f77b4', linewidth=1.8, label='output', zorder=4)
-        ax.fill_between(t, out, des, alpha=0.18, color='#d62728', label='error')
-        ax.set_xlabel('time [µs]', fontsize=11)
-        ax.set_ylabel('voltage [mV]', fontsize=11)
-        ax.set_title(
+        label = '(8R)' if '8r' in ckt_name else ''
+        title = (
             f'BJT Class A Amplifier {label} — Gain = {desired_gain:.0f}   '
-            f'(exec {exec_counter}, seed {seed})',
-            fontsize=12, fontweight='bold'
+            f'(exec {exec_counter}, seed {seed})'
         )
-        ax.legend(fontsize=10, loc='upper right')
-        ax.grid(True, linestyle=':', alpha=0.6)
-
-        res_str = ', '.join(f'{r/1000:.1f}k' for r in metrics['resistances'])
-        annotation = (
-            f"avg err: {metrics['avg_error_percent']:.2f}%\n"
-            f"max err: {metrics['max_error_percent']:.2f}%\n"
-            f"R: [{res_str}] Ω"
-        )
-        ax.text(0.01, 0.97, annotation, transform=ax.transAxes, fontsize=9,
-                verticalalignment='top',
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
-                          alpha=0.8, edgecolor='#aaaaaa'))
-
-        axe = axes[1]
-        axe.fill_between(t, np.abs(out - des), color='#d62728', alpha=0.5, linewidth=0)
-        axe.plot(t, np.abs(out - des), color='#d62728', linewidth=1.0)
-        axe.set_xlabel('time [µs]', fontsize=11)
-        axe.set_ylabel('|error| [mV]', fontsize=11)
-        axe.grid(True, linestyle=':', alpha=0.6)
-
         path = os.path.join(out_dir, f'{ckt_name}_gain{desired_gain:.0f}_execution{exec_counter}.png')
-        fig.savefig(path, dpi=150, bbox_inches='tight')
-        plt.close(fig)
+        evolution_common.plot_waveforms(metrics, path, title)
         print(f'  [saved] {path}')
 
 
