@@ -6,6 +6,8 @@ import PySpice.Logging.Logging as Logging
 logger = Logging.setup_logging(logging_level='ERROR')
 
 class BJTClassAAmp:
+	_MIN_SPICE_R = 1e-3  # NGSpice can't handle true 0 Ω
+
 	def __init__(self, sin_dc_offset=0, sin_ampl=0.01, sin_freq=1000, vcc=3.3, ckt_name='BJT Class 1 Amplifier', load=10000) -> None:
 		circuit = Circuit(ckt_name)
 		
@@ -31,6 +33,7 @@ class BJTClassAAmp:
 		circuit.BJT(1, 4, 3, 5, model='bc547b')  # (name, collector, base, emmiter, model)
 
 		self.circuit = circuit
+		self._resistors_configured = False
 
 
 	def configure_resistors(self, values) -> None:
@@ -40,11 +43,12 @@ class BJTClassAAmp:
 		'''
 		if len(values) != 4:
 			raise ValueError('4 resistors values are required!')
-		
-		self.circuit.R1.resistance = values[0]@unit.u_Ohm
-		self.circuit.R2.resistance = values[1]@unit.u_Ohm
-		self.circuit.Rc.resistance = values[2]@unit.u_Ohm
-		self.circuit.Re.resistance = values[3]@unit.u_Ohm
+		_r = [max(float(v), self._MIN_SPICE_R) for v in values]
+		self.circuit.R1.resistance = _r[0]@unit.u_Ohm
+		self.circuit.R2.resistance = _r[1]@unit.u_Ohm
+		self.circuit.Rc.resistance = _r[2]@unit.u_Ohm
+		self.circuit.Re.resistance = _r[3]@unit.u_Ohm
+		self._resistors_configured = True
 
 
 	def configure_capacitors(self, cin, ce, cout) -> None:
@@ -63,11 +67,13 @@ class BJTClassAAmp:
 	def configure_input_signal(self, ampl=0.01, dc_offset=0, freq=1000) -> None:
 		self.circuit.Vs.amplitude = ampl@unit.u_V
 		self.circuit.Vs.dc_offset = dc_offset@unit.u_V
-		self.circuit.frequency = freq@unit.u_Hz
+		self.circuit.Vs.frequency = freq@unit.u_Hz
 
 	
-	def transient_analysis(self, step_time=0.00001, end_time=0.002) -> object:
-		simulator = self.circuit.simulator(temperature=25, nominal_temperature=25)
+	def transient_analysis(self, step_time=0.00001, end_time=0.002, temperature=25) -> object:
+		if not self._resistors_configured:
+			raise RuntimeError('configure_resistors() must be called before transient_analysis()')
+		simulator = self.circuit.simulator(temperature=temperature, nominal_temperature=25)
 		return simulator.transient(step_time=step_time, end_time=end_time)
 	
 
@@ -101,6 +107,7 @@ class BJTClassAAmp8R(BJTClassAAmp):
 		circuit.BJT(1, 4, 3, 5, model='bc547b')  # (name, collector, base, emmiter, model)
 
 		self.circuit = circuit
+		self._resistors_configured = False
 
 
 	def configure_resistors(self, values) -> None:
@@ -111,15 +118,16 @@ class BJTClassAAmp8R(BJTClassAAmp):
 		
 		if len(values) != 8:
 			raise ValueError('8 resistors values are required!')
-		
-		self.circuit.R11.resistance = values[0]@unit.u_Ohm
-		self.circuit.R12.resistance = values[1]@unit.u_Ohm
-		self.circuit.R21.resistance = values[2]@unit.u_Ohm
-		self.circuit.R22.resistance = values[3]@unit.u_Ohm
-		self.circuit.Rc1.resistance = values[4]@unit.u_Ohm
-		self.circuit.Rc2.resistance = values[5]@unit.u_Ohm
-		self.circuit.Re1.resistance = values[6]@unit.u_Ohm
-		self.circuit.Re2.resistance = values[7]@unit.u_Ohm
+		_r = [max(float(v), self._MIN_SPICE_R) for v in values]
+		self.circuit.R11.resistance = _r[0]@unit.u_Ohm
+		self.circuit.R12.resistance = _r[1]@unit.u_Ohm
+		self.circuit.R21.resistance = _r[2]@unit.u_Ohm
+		self.circuit.R22.resistance = _r[3]@unit.u_Ohm
+		self.circuit.Rc1.resistance = _r[4]@unit.u_Ohm
+		self.circuit.Rc2.resistance = _r[5]@unit.u_Ohm
+		self.circuit.Re1.resistance = _r[6]@unit.u_Ohm
+		self.circuit.Re2.resistance = _r[7]@unit.u_Ohm
+		self._resistors_configured = True
 
 
 # class SallenKeyFilter:

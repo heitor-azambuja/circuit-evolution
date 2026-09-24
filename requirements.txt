@@ -1,5 +1,5 @@
-numpy
-scipy
-pygad
-PySpice
-matplotlib
+numpy==2.4.4
+scipy==1.17.1
+pygad==3.5.0
+PySpice==1.5
+matplotlib==3.10.8
