@@ -41,8 +41,29 @@ This file contains a class that defines a digital potenciomenter.
 ### circuits.py
 Classes to instantiate the circuits that are evolved. Two BJT class A amplifiers, one with 4 resistors, ant one with 8 resistors.
 
+### evolution_common.py
+Shared GA logic used by both `amp_4r_evolution.py` and `amp_8r_evolution.py`: fitness evaluation, early stopping, waveform/fitness plotting, and the CLI. Each amp script only defines a `CircuitSpec` (which circuit, how many resistors, how genes map to resistor values) and calls `run_cli()`.
+
 ### amp_4r_evolution.py And amp_8r_evolution.py
-Scripts that define the fitness function and run the evolution of the amplifier with 4 and 8 resistors respectively.
+Thin per-circuit configs that run the evolution of the amplifier with 4 and 8 resistors respectively, via `evolution_common.py`.
+
+### data_parse.py
+Reads and writes run results to/from `simulations/data.csv` (one row per GA run).
+
+### evaluate_sims.py
+Summarizes and compares runs from `simulations/data.csv`: error/convergence statistics, success rates, and 4R-vs-8R significance testing, plus the summary/comparison plots.
+
+### plot_results.py
+Regenerates waveform, fitness-history, and summary plots from saved data (`simulations/data.csv` and `simulations/fitness_history_*.json`) without re-running the GA. Usage:
+```bash
+python3 plot_results.py                  # regenerate everything
+python3 plot_results.py --waveforms      # waveform plots only
+python3 plot_results.py --fitness        # fitness history plots only
+python3 plot_results.py --summary        # evaluate_sims summary plots only
+```
+
+### examples.py
+Standalone PySpice example plotting NPN BJT characteristic curves; not part of the evolution pipeline.
 
 ## Running
 Evolve class A amplifier with 4 resistors:
@@ -54,7 +75,16 @@ Evolve class A amplifier with 8 resistors:
 python3 amp_8r_evolution.py
 ```
 
+Both scripts accept the same CLI flags: `-g/--generations`, `-p/--population`, `-r/--repetitions`, `--seed`, `--gain`, `--exec-counter`, and `--plots` (save PNG plots after each run — off by default). Run with `--help` for details.
+
 When running, Pyspice might show some warning and error messages about Ngspice not supported version. But it should work fine.
+
+## Running tests
+Install dev dependencies and run the unit test suite (no ngspice simulation is required — the tests only cover the pure-Python logic):
+```bash
+python3 -m pip install -r requirements.txt
+pytest
+```
 
 ## Contributing
 
