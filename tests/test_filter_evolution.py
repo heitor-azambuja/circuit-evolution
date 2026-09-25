@@ -9,13 +9,15 @@ import filter_evaluation
 
 FC = 1000.0
 TARGETS = {
-    'butterworth': {'response': filter_design.BUTTERWORTH, 'ripple_db': None},
-    'chebyshev': {'response': filter_design.CHEBYSHEV, 'ripple_db': 0.5},
+    'butterworth': {'response': filter_design.BUTTERWORTH, 'ripple_db': None,
+                    'cutoff_hz': FC},
+    'chebyshev': {'response': filter_design.CHEBYSHEV, 'ripple_db': 0.5,
+                  'cutoff_hz': FC},
 }
 
 
 def _evaluator():
-    return filter_evaluation.AcResponseEvaluator(fc_hz=FC, order=4, targets=TARGETS)
+    return filter_evaluation.AcResponseEvaluator(order=4, targets=TARGETS)
 
 
 def _sweep_freqs(start=10, stop=100_000, points_per_decade=20):
@@ -120,7 +122,7 @@ def test_chebyshev_target_differs_from_butterworth():
 def test_unknown_response_in_targets_is_rejected():
     with pytest.raises(ValueError):
         filter_evaluation.AcResponseEvaluator(
-            fc_hz=FC, order=4, targets={'bessel': {'response': 'bessel'}})
+            order=4, targets={'bessel': {'response': 'bessel', 'cutoff_hz': FC}})
 
 
 def test_exact_response_scores_the_maximum_fitness():
@@ -198,7 +200,7 @@ def test_cutoff_is_reported_as_missing_when_never_reached():
 
 def test_target_slug_and_fields_identify_the_filter_cell():
     evaluator = _evaluator()
-    assert evaluator.target_slug('butterworth') == 'butterworth4p'
+    assert evaluator.target_slug('butterworth') == 'butterworth_4p'
     assert evaluator.target_fields('chebyshev') == {
         'response': 'chebyshev', 'order': 4, 'cutoff_hz': FC, 'ripple_db': 0.5}
 
@@ -260,8 +262,8 @@ def test_8r_realizes_the_ideal_resistors_more_closely_than_4r():
     import filter_sk4_evolution as sk4
     import filter_sk8_evolution as sk8
 
-    coarse = filter_baseline.design(sk4, 'chebyshev')
-    fine = filter_baseline.design(sk8, 'chebyshev')
+    coarse = filter_baseline.design(sk4, 'chebyshev_1000')
+    fine = filter_baseline.design(sk8, 'chebyshev_1000')
 
     ideal = np.array(coarse['ideal_resistors'])
     error_4r = np.abs(np.array(coarse['quantized_resistors']) - ideal).max()
@@ -296,3 +298,45 @@ def test_evolution_run_drives_the_filter_evaluator():
     assert circuit.resistances == [100.0, 200.0, 300.0, 400.0]
     assert run.data_json['response'] == 'butterworth'
     assert run._eval_failures == 0
+
+
+def test_targets_sweep_the_cutoff_across_both_response_families():
+    """The cutoff sweep is the filter's analogue of the amplifier's four gains."""
+    import filter_targets
+
+    cutoffs = {spec['cutoff_hz'] for spec in filter_targets.TARGETS.values()}
+    families = {spec['response'] for spec in filter_targets.TARGETS.values()}
+
+    assert cutoffs == set(filter_targets.CUTOFFS_HZ)
+    assert len(families) == 2
+    assert len(filter_targets.TARGETS) == len(cutoffs) * len(families)
+
+
+def test_each_target_carries_its_own_cutoff_into_the_evaluator():
+    import filter_sk4_evolution as sk4
+
+    evaluator = sk4.SPEC.evaluator
+    assert evaluator.cutoff_hz('butterworth_1000') == 1000.0
+    assert evaluator.cutoff_hz('butterworth_3000') == 3000.0
+    assert evaluator.target_fields('chebyshev_2000')['cutoff_hz'] == 2000.0
+
+
+def test_target_curves_differ_between_cutoffs_of_the_same_family():
+    import filter_sk4_evolution as sk4
+
+    evaluator = sk4.SPEC.evaluator
+    freqs = _sweep_freqs()
+    assert not np.allclose(evaluator.target_db(freqs, 'butterworth_1000'),
+                           evaluator.target_db(freqs, 'butterworth_3000'))
+
+
+def test_ideal_resistors_shrink_as_the_cutoff_rises():
+    """With capacitors fixed the resistors scale as 1/fc, which is what bounds the sweep."""
+    import filter_baseline
+    import filter_sk4_evolution as sk4
+
+    low = filter_baseline.design(sk4, 'butterworth_1000')['ideal_resistors']
+    high = filter_baseline.design(sk4, 'butterworth_3000')['ideal_resistors']
+
+    for a, b in zip(low, high):
+        assert b == pytest.approx(a / 3.0, rel=1e-6)

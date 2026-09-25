@@ -33,10 +33,9 @@ class AcResponseEvaluator:
         {'butterworth': {'response': filter_design.BUTTERWORTH, 'ripple_db': None}}
     """
 
-    def __init__(self, fc_hz: float, order: int, targets: dict,
+    def __init__(self, order: int, targets: dict,
                  start_hz: float = 10, stop_hz: float = 100_000,
                  points_per_decade: int = 20):
-        self.fc_hz = fc_hz
         self.order = order
         self.targets = targets
         self.start_hz = start_hz
@@ -47,7 +46,7 @@ class AcResponseEvaluator:
         self._coefficients = {}
         self._dc_gain_db = {}
         for name, spec in targets.items():
-            wn = 2 * np.pi * fc_hz
+            wn = 2 * np.pi * spec['cutoff_hz']
             if spec['response'] == filter_design.BUTTERWORTH:
                 self._coefficients[name] = scipy.signal.butter(
                     order, wn, btype='low', analog=True)
@@ -75,17 +74,21 @@ class AcResponseEvaluator:
         _, h = scipy.signal.freqs(b, a, worN=2 * np.pi * np.asarray(freqs))
         return 20 * np.log10(np.abs(h)) - self._dc_gain_db[target]
 
-    def weights(self, freqs) -> np.ndarray:
+    def cutoff_hz(self, target) -> float:
+        return self.targets[target]['cutoff_hz']
+
+    def weights(self, freqs, target) -> np.ndarray:
+        cutoff = self.cutoff_hz(target)
         freqs = np.asarray(freqs)
         w = np.full(freqs.shape, _WEIGHT_STOPBAND)
-        w[freqs <= 10 * self.fc_hz] = _WEIGHT_TRANSITION
-        w[freqs <= self.fc_hz] = _WEIGHT_PASSBAND
+        w[freqs <= 10 * cutoff] = _WEIGHT_TRANSITION
+        w[freqs <= cutoff] = _WEIGHT_PASSBAND
         return w
 
     def weighted_rmse_db(self, freqs, response_db, target) -> float:
         reference = self.target_db(freqs, target)
         error = np.maximum(response_db, _DB_FLOOR) - np.maximum(reference, _DB_FLOOR)
-        w = self.weights(freqs)
+        w = self.weights(freqs, target)
         return float(np.sqrt(np.sum(w * error ** 2) / np.sum(w)))
 
     def _sweep(self, circuit, resistances) -> tuple:
@@ -107,10 +110,12 @@ class AcResponseEvaluator:
     def metrics(self, circuit, resistances, target) -> dict:
         freqs, response_db = self._sweep(circuit, resistances)
         reference_db = self.target_db(freqs, target)
-        passband = freqs <= self.fc_hz
+        cutoff = self.cutoff_hz(target)
+        passband = freqs <= cutoff
 
         return {
             'resistances': list(resistances),
+            'cutoff_target_hz': cutoff,
             'freqs': freqs,
             'response_db': response_db,
             'target_db': reference_db,
@@ -121,17 +126,17 @@ class AcResponseEvaluator:
             # Interpolated in log-frequency: the sweep grid is logarithmic, and
             # 10*fc only lands exactly on it for particular sweep parameters.
             'attenuation_at_10fc_db': float(np.interp(
-                np.log10(10 * self.fc_hz), np.log10(freqs), response_db)),
+                np.log10(10 * cutoff), np.log10(freqs), response_db)),
         }
 
     def plot(self, metrics: dict, save_path: str, title: str) -> None:
-        _plot_response(metrics, save_path, title, self.fc_hz)
+        _plot_response(metrics, save_path, title, metrics['cutoff_target_hz'])
 
     def target_fields(self, target) -> dict:
         return {
             'response': target,
             'order': self.order,
-            'cutoff_hz': self.fc_hz,
+            'cutoff_hz': self.cutoff_hz(target),
             'ripple_db': self.targets[target].get('ripple_db'),
         }
 
@@ -139,18 +144,21 @@ class AcResponseEvaluator:
         fields = {key: metrics[key] for key in (
             'rmse_db', 'max_passband_error_db', 'cutoff_realized_hz',
             'attenuation_at_10fc_db')}
+        cutoff = metrics['cutoff_target_hz']
         fields['cutoff_error_percent'] = (
-            (metrics['cutoff_realized_hz'] - self.fc_hz) / self.fc_hz * 100
+            (metrics['cutoff_realized_hz'] - cutoff) / cutoff * 100
             if metrics['cutoff_realized_hz'] is not None else None
         )
         fields['resistors'] = metrics['resistances']
         return fields
 
     def target_slug(self, target) -> str:
-        return f'{target}{self.order}p'
+        return f'{target}_{self.order}p'
 
     def target_label(self, target) -> str:
-        return f'{target.capitalize()} {self.order}th order, fc = {self.fc_hz:.0f} Hz'
+        family = target.rsplit('_', 1)[0].capitalize()
+        return (f'{family} {self.order}th order, '
+                f'fc = {self.cutoff_hz(target):.0f} Hz')
 
     def target_from_row(self, row: dict):
         """Recover the target from a saved CSV row, for regenerating plots."""

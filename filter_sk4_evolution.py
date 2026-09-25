@@ -16,7 +16,7 @@ import components
 import filter_design
 from evolution_common import CircuitSpec, run_cli
 from filter_evaluation import AcResponseEvaluator
-from filter_targets import CUTOFF_HZ, ORDER, TARGETS, configure
+from filter_targets import ORDER, TARGETS, configure
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,7 +40,7 @@ SPEC = CircuitSpec(
     circuit_factory=circuits.SallenKeyLowPass,
     num_genes=4,
     resistor_mapper=resistor_mapper,
-    evaluator=AcResponseEvaluator(fc_hz=CUTOFF_HZ, order=ORDER, targets=TARGETS),
+    evaluator=AcResponseEvaluator(order=ORDER, targets=TARGETS),
     setup_hook=configure,
     default_population=20,
     default_generations=400,

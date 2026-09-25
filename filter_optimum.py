@@ -160,7 +160,7 @@ def search(target: str) -> dict:
 
     floor = np.float32(filter_evaluation._DB_FLOOR)
     target_db = np.maximum(evaluator.target_db(freqs, target), floor).astype(np.float32)
-    weights = evaluator.weights(freqs).astype(np.float32)
+    weights = evaluator.weights(freqs, target).astype(np.float32)
     weight_total = float(weights.sum())
     index_of = {pair: i for i, pair in enumerate(pairs)}
 

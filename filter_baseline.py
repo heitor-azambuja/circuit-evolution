@@ -21,7 +21,7 @@ import data_parse
 import filter_design
 import filter_sk4_evolution
 import filter_sk8_evolution
-from filter_targets import CUTOFF_HZ, ORDER, TARGETS
+from filter_targets import ORDER, TARGETS
 
 logger = logging.getLogger()
 
@@ -36,7 +36,7 @@ def design(module, target: str) -> dict:
     spec = TARGETS[target]
     caps_nf = spec['capacitors_nf']
     stages = filter_design.stage_parameters(
-        ORDER, spec['response'], CUTOFF_HZ, ripple_db=spec['ripple_db'])
+        ORDER, spec['response'], spec['cutoff_hz'], ripple_db=spec['ripple_db'])
 
     ideal = []
     for (wo, q), (c1_nf, c2_nf) in zip(stages, ((caps_nf[0], caps_nf[1]),
