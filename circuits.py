@@ -5,6 +5,13 @@ from PySpice.Spice.Library import SpiceLibrary
 import PySpice.Logging.Logging as Logging
 logger = Logging.setup_logging(logging_level='ERROR')
 
+
+# The op-amp the filter is built around: dual, rail-to-rail, 1.8-6 V single
+# supply, 100 µA/channel, so one package covers both stages of the 4th-order
+# filter on the same 5 V rail the X9C pots run from. Its small-signal macromodel
+# lives in mcp6002.spice, with every parameter traced to the datasheet.
+MCP6002 = 'MCP6002'
+
 class BJTClassAAmp:
 	_MIN_SPICE_R = 1e-3  # NGSpice can't handle true 0 Ω
 
@@ -94,13 +101,23 @@ class SallenKeyLowPass:
 	_MIN_SPICE_R = 1e-3  # NGSpice can't handle true 0 Ω
 	_STAGE_TAGS = ('a', 'b')
 
-	def __init__(self, sin_ampl=1.0, sin_freq=1000, ckt_name='Sallen-Key Low-Pass') -> None:
+	def __init__(self, op_amp=MCP6002, sin_ampl=1.0, sin_freq=1000,
+				 ckt_name='Sallen-Key Low-Pass') -> None:
+		'''
+			op_amp: the name of a subcircuit in the SPICE library, or None for an
+			ideal unity buffer. The ideal one exists so the netlist can be checked
+			against the analytical response, which assumes an ideal op-amp;
+			experiments run with the real part.
+		'''
 		circuit = Circuit(ckt_name)
 
 		circuit.SinusoidalVoltageSource('s', 'in', circuit.gnd,
 										amplitude=sin_ampl@unit.u_V,
 										frequency=sin_freq@unit.u_Hz,
 										ac_magnitude=1@unit.u_V)
+
+		if op_amp is not None:
+			circuit.include(SpiceLibrary('.')[op_amp])
 
 		node_in = 'in'
 		for index, tag in enumerate(self._STAGE_TAGS):
@@ -112,14 +129,29 @@ class SallenKeyLowPass:
 			circuit.R(f'2{tag}', mid, opamp_in)
 			circuit.C(f'1{tag}', mid, node_out)
 			circuit.C(f'2{tag}', opamp_in, circuit.gnd)
-			circuit.VCVS(f'op{tag}', node_out, circuit.gnd, opamp_in, circuit.gnd,
-						 voltage_gain=1)
+			self._add_buffer(circuit, tag, opamp_in, node_out, op_amp)
 
 			node_in = node_out
 
 		self.circuit = circuit
+		self.op_amp = op_amp
 		self._resistors_configured = False
 		self._capacitors_configured = False
+
+
+	@staticmethod
+	def _add_buffer(circuit, tag, node_plus, node_out, op_amp) -> None:
+		'''
+			Wire the stage's op-amp as a unity-gain buffer: the inverting input is
+			tied to the stage output, so the part's finite gain-bandwidth shows up
+			as the droop and Q error a real one would produce.
+		'''
+		if op_amp is None:
+			circuit.VCVS(f'op{tag}', node_out, circuit.gnd, node_plus, circuit.gnd,
+						 voltage_gain=1)
+			return
+
+		circuit.X(f'op{tag}', op_amp, node_plus, node_out, node_out)
 
 
 	def configure_resistors(self, values) -> None:

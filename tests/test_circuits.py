@@ -1,3 +1,6 @@
+import math
+import re
+
 import pytest
 
 import circuits
@@ -75,7 +78,43 @@ def test_sallen_key_ac_analysis_requires_capacitors_configured():
         filt.ac_analysis()
 
 
-def test_sallen_key_cascades_two_stages_through_an_ideal_buffer():
+def test_sallen_key_cascades_two_stages():
     netlist = str(circuits.SallenKeyLowPass().circuit)
-    assert 'Eopa' in netlist and 'Eopb' in netlist
     assert 'C1b midb out' in netlist  # second stage bootstraps to the final output
+    assert 'R1a in mida' in netlist
+
+
+def test_sallen_key_defaults_to_the_real_part():
+    """Experiments run with the MCP6002; the ideal buffer is opt-in."""
+    filt = circuits.SallenKeyLowPass()
+    netlist = str(filt.circuit)
+
+    assert filt.op_amp == circuits.MCP6002
+    assert 'mcp6002.spice' in netlist
+    # Both stages instantiate the part, wired as unity-gain buffers: the
+    # inverting input and the output are the same node.
+    assert 'Xopa opina stagea stagea MCP6002' in netlist
+    assert 'Xopb opinb out out MCP6002' in netlist
+
+
+def test_sallen_key_ideal_op_amp_is_a_plain_unity_buffer():
+    netlist = str(circuits.SallenKeyLowPass(op_amp=None).circuit)
+    assert 'Eopa' in netlist and 'Eopb' in netlist
+    assert 'MCP6002' not in netlist
+
+
+def test_mcp6002_model_matches_the_datasheet_typicals():
+    """Guards the two numbers the filter's accuracy actually hinges on."""
+    model = open('mcp6002.spice').read()
+    open_loop_gain = float(re.search(r'^Eol .*? ([\d.]+)\s*$', model,
+                                     re.MULTILINE).group(1))
+    resistance = float(re.search(r'^Rdom .*?([\d.]+)K\s*$', model,
+                                 re.MULTILINE).group(1)) * 1e3
+    capacitance = float(re.search(r'^Cdom .*?([\d.]+)U\s*$', model,
+                                  re.MULTILINE).group(1)) * 1e-6
+
+    # DC Open-Loop Gain, 112 dB typical
+    assert 20 * math.log10(open_loop_gain) == pytest.approx(112.0, abs=0.01)
+    # Gain Bandwidth Product, 1.0 MHz typical, set by the dominant pole
+    pole_hz = 1.0 / (2 * math.pi * resistance * capacitance)
+    assert pole_hz * open_loop_gain == pytest.approx(1e6, rel=1e-4)
