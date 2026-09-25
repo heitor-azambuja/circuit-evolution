@@ -29,7 +29,16 @@ say "Pacotes do sistema"
 sudo apt-get update -qq
 sudo apt-get install -y -qq ngspice libngspice0 libngspice0-dev \
                            python3-venv python3-dev build-essential
-ok "ngspice $(ngspice -v 2>&1 | grep -oP 'ngspice-\d+' | head -1)"
+NGSPICE_VER=$(ngspice -v 2>&1 | grep -oP 'ngspice-\K\d+' | head -1)
+ok "ngspice $NGSPICE_VER"
+# ngspice is the solver, and apt gives whatever the Ubuntu release carries: 36 on
+# 22.04, 42/43 on 24.04. Different solvers can return slightly different numbers,
+# and nothing in the result CSVs would record which one produced them.
+REFERENCE_NGSPICE=39
+if [ "$NGSPICE_VER" != "$REFERENCE_NGSPICE" ]; then
+  printf '   \033[33maviso\033[0m  esta maquina tem ngspice %s; os resultados de referencia\n' "$NGSPICE_VER"
+  printf '           foram produzidos com a %s. Anote isso ao juntar os CSVs.\n' "$REFERENCE_NGSPICE"
+fi
 
 say "Ambiente Python"
 python3 -c 'import sys; sys.exit(0 if (3,9) <= sys.version_info < (3,13) else 1)' \
