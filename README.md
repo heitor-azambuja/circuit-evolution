@@ -120,6 +120,52 @@ Process isolation is not tidiness: PySpice leaks about 47 kB per simulation and
 never returns it, so a run costs a few hundred megabytes that only a process exit
 reclaims.
 
+`--variant` and `--population` exist to break one confound. In **both** families the
+two variants default to different search budgets — 4R evolves 4 genes with a
+population of 20, 8R evolves 8 with a population of 40 — so a plain 4R-vs-8R result
+mixes resistor resolution with the number of evaluations each side was allowed.
+Re-run one variant at the other's population to separate them:
+
+```bash
+RESULTS=results-control FAMILIES=filter \
+    ./run_campaign.sh 1/1 --variant 4R --population 40
+RESULTS=results-control FAMILIES=amp \
+    ./run_campaign.sh 1/1 --variant 4R --population 40
+```
+
+Or `FAMILIES="filter amp"` for both in one go — they write separate CSVs.
+
+Every row records the population it ran with, so a control and the original campaign
+stay distinguishable inside the CSV. Keep them in separate output directories
+though: fitness history filenames are built from circuit, target and seed only, so a
+control writes over the histories it is meant to be compared against. `campaign.py`
+warns when it is about to, counting only the files the families and variants being
+run would actually touch.
+
+### analyze_campaign.py
+Statistics for the finished campaign in `simulations/campaign/`, which
+`evaluate_sims.py` cannot describe because it is shaped around the amplifier's
+time-domain columns. Reads only the CSVs, so every figure quoted in a write-up can
+be regenerated and checked:
+
+```bash
+python3 analyze_campaign.py
+```
+
+It prints an integrity block first (cell coverage, duplicate seeds, evaluation
+failures, shard agreement) because a fault there invalidates everything after it,
+and it reports the per-variant search budget explicitly: the 4R and 8R specs
+default to populations of 20 and 40, so a 4R-vs-8R difference confounds resistor
+resolution with search budget until a matched-budget control is run.
+
+Two measurement notes it encodes. The variants are *independent* samples, not
+paired — the same seed drives a 4-gene and an 8-gene GA, whose populations are
+unrelated — so it uses Mann-Whitney with a Holm correction, not a paired test. And
+it re-derives cutoff error against the ideal response's own -3 dB point, because
+the CSV's `cutoff_error_percent` compares against the nominal cutoff, which for
+Chebyshev I is the ripple-band edge and sits about 10% below -3 dB even in the
+ideal filter.
+
 ### amp_design.py
 The amplifier's analytical design equations, the counterpart of `filter_design`.
 The contrast is the point: the filter's equations are exact, while these are

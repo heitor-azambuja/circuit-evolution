@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 #
-# Run both circuit families, one after the other, for this machine's slice.
+# Run the circuit families, one after the other, for this machine's slice.
 #
 #   ./run_campaign.sh 1/2          # machine A of two
 #   ./run_campaign.sh 2/2          # machine B
 #   ./run_campaign.sh 1/1 -w 8     # one machine, custom worker count
+#
+# Extra arguments are passed straight to campaign.py, and RESULTS and FAMILIES
+# override where output lands and which families run. That combination is what a
+# matched-budget control looks like -- 4R re-run at 8R's population, kept well away
+# from the campaign it will be compared against:
+#
+#   RESULTS=results-control FAMILIES=filter \
+#       ./run_campaign.sh 1/1 --variant 4R --population 40
+#
+# A separate RESULTS is not optional there. Fitness history filenames carry no
+# population, so writing into the original directory would overwrite the campaign's
+# histories with the control's (campaign.py warns, but only after the fact).
 #
 # Sequential rather than concurrent on purpose: both families are CPU-bound, so
 # running them together only splits the same cores and makes each slower. It also
@@ -21,7 +33,8 @@ shift || true
 
 SEEDS=${SEEDS:-100}
 TAG=$(echo "$SHARD" | tr '/' 'de')
-RESULTS=results
+RESULTS=${RESULTS:-results}
+FAMILIES=${FAMILIES:-"filter amp"}
 mkdir -p "$RESULTS"
 
 [ -x venv/bin/python ] || { echo "venv ausente — rode ./setup_env.sh primeiro" >&2; exit 1; }
@@ -37,8 +50,9 @@ fi
 
 started=$(date +%s)
 echo "campanha iniciada $(date '+%F %T') | shard $SHARD | $SEEDS sementes | $*"
+echo "familias: $FAMILIES | saida: $RESULTS/"
 
-for family in filter amp; do
+for family in $FAMILIES; do
   log="$RESULTS/${family}_${TAG}.log"
   csv="$RESULTS/${family}_${TAG}.csv"
   echo
