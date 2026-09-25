@@ -38,14 +38,25 @@ def _module(variant: str):
 
 
 def _run_one(job) -> tuple:
-    variant, target, seed, out_dir = job
+    variant, target, seed, out_dir, patience = job
+
+    import json
 
     import evolution_common
     spec = _module(variant).SPEC
     run = evolution_common.EvolutionRun(spec, target=target, exec_counter=seed, seed=seed)
     data = run.evolve(spec.default_generations, spec.default_population,
-                      auto_plots=False, out_dir=out_dir)
-    return variant, target, seed, data['solution_fitness'], data['solution']
+                      auto_plots=False, out_dir=out_dir, patience=patience)
+
+    # One extra evaluation buys every response metric for the winning solution.
+    # Without it the campaign would record only a fitness and a set of taps, and
+    # recovering the rest would mean re-simulating every run afterwards.
+    solution = json.loads(data['solution'])
+    metrics = spec.evaluator.metrics(run.circuit, spec.resistor_mapper(solution), target)
+    data.update(spec.evaluator.metric_fields(metrics))
+    data['variant'] = variant
+    data['target'] = target
+    return data
 
 
 def _baseline(variant: str, target: str) -> float:
@@ -53,23 +64,30 @@ def _baseline(variant: str, target: str) -> float:
     return filter_baseline.evaluate(_module(variant), target)['solution_fitness']
 
 
-def run(seeds: int, out_dir: str) -> list:
+def run(seeds: int, out_dir: str, workers: int = _WORKERS,
+        patience: int = None, data_csv: str = None) -> list:
+    import data_parse
+
     targets = list(_module('4R').TARGETS)
-    jobs = [(variant, target, seed, out_dir)
+    jobs = [(variant, target, seed, out_dir, patience)
             for variant in VARIANTS for target in targets
             for seed in range(1, seeds + 1)]
 
     collected = {}
     context = multiprocessing.get_context('spawn')
-    with context.Pool(processes=_WORKERS, maxtasksperchild=1,
+    with context.Pool(processes=workers, maxtasksperchild=1,
                       initializer=_limit_memory) as pool:
-        for done, (variant, target, seed, fitness, solution) in enumerate(
-                pool.imap_unordered(_run_one, jobs), start=1):
-            collected.setdefault((variant, target), []).append((fitness, solution))
+        for done, data in enumerate(pool.imap_unordered(_run_one, jobs), start=1):
+            variant, target = data['variant'], data['target']
+            collected.setdefault((variant, target), []).append(
+                (data['solution_fitness'], data['solution']))
+            if data_csv:
+                data_parse.dump_json_to_csv(data_csv, data)
             # PySpice configures the root logger on import, which swallows
             # INFO from here, so progress goes straight to stdout.
-            print(f'  [{done}/{len(jobs)}] {variant} {target} seed={seed} '
-                  f'fitness={fitness:.6f}', flush=True)
+            print(f"  [{done}/{len(jobs)}] {variant} {target} "
+                  f"seed={data['seed']} fitness={data['solution_fitness']:.6f} "
+                  f"gen={data['generations_completed']}", flush=True)
 
     results = []
     for variant in VARIANTS:
@@ -98,9 +116,14 @@ def main() -> None:
     parser.add_argument('--out', help='Write results to this JSON file')
     parser.add_argument('--out-dir', default='simulations',
                         help='Where per-run fitness histories are written')
+    parser.add_argument('-w', '--workers', type=int, default=_WORKERS)
+    parser.add_argument('--patience', type=int, default=None,
+                        help='Generations without a new best before a run stops')
+    parser.add_argument('--data-csv', help='Append every run to this CSV')
     args = parser.parse_args()
 
-    results = run(args.seeds, args.out_dir)
+    results = run(args.seeds, args.out_dir, workers=args.workers,
+                  patience=args.patience, data_csv=args.data_csv)
 
     print()
     for row in results:

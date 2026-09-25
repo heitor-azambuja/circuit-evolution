@@ -28,6 +28,23 @@ logger = logging.getLogger()
 # Simulation time step (s) used for both fitness evaluation and plots.
 _STEP_TIME_FINE = 0.000005
 
+# Generations without a new best before a run stops. None disables it, which is
+# the default because early stopping is not free here.
+#
+# Measured over 160 runs, stopping at the FIRST gap of this length (which is what
+# the code does) and comparing against running the full 400 generations:
+#
+#   patience   generations saved   runs ending below 99% of their 400-gen fitness
+#         50               49.6%   45/160, worst case 85.0%
+#        100               24.6%   21/160, worst case 91.7%
+#        150               12.4%    9/160, worst case 95.2%
+#        200                6.2%    6/160
+#
+# These runs keep finding small improvements late, so any gap short enough to
+# save real time also kills runs that had more to give. Enable it only where
+# throughput matters more than the quality of each result.
+_DEFAULT_PATIENCE = None
+
 _MIN_FITNESS = 1e-10
 _MAX_FITNESS = 1e10
 
@@ -292,8 +309,11 @@ class EvolutionRun:
             return 'stop'
 
     def evolve(self, generations: int, population: int, mutation_probability: float = 0.1,
-               auto_plots: bool = False, out_dir: str = 'simulations') -> dict:
-        self.patience = generations
+               auto_plots: bool = False, out_dir: str = 'simulations',
+               patience: Optional[int] = None) -> dict:
+        patience = _DEFAULT_PATIENCE if patience is None else patience
+        # No patience means no early stopping: the counter can never reach it.
+        self.patience = generations if patience is None else patience
         self._no_improve_count = 0
         self._best_fitness_seen = -np.inf
 
@@ -323,6 +343,8 @@ class EvolutionRun:
         runtime_s = time.perf_counter() - start_time
 
         self.data_json['generations'] = generations
+        self.data_json['generations_completed'] = ga_instance.generations_completed
+        self.data_json['patience'] = self.patience
         self.data_json['population'] = population
         self.data_json['solution'] = json.dumps(solution.tolist())
         self.data_json['solution_fitness'] = solution_fitness
@@ -396,6 +418,9 @@ def build_arg_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument('--seed', type=int, help='RNG seed')
     parser.add_argument('--gain', type=int, help='Run only for this gain')
     parser.add_argument('--target', help='Run only for this target (non-numeric targets)')
+    parser.add_argument('--patience', type=int, default=_DEFAULT_PATIENCE,
+                         help='Stop after this many generations with no new best '
+                              '(off by default; it costs quality, see evolution_common)')
     return parser
 
 
@@ -428,5 +453,6 @@ def run_cli(spec: CircuitSpec, target_list: Optional[List] = None,
             np.random.seed(seed)
 
             run = EvolutionRun(spec, target=target, exec_counter=exec_counter, seed=seed)
-            data_json = run.evolve(generations, population, auto_plots=auto_plots)
+            data_json = run.evolve(generations, population, auto_plots=auto_plots,
+                                   patience=args.patience)
             data_parse.dump_json_to_csv(data_csv, data_json)

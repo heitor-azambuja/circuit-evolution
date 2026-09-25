@@ -7,8 +7,10 @@ from evolution_common import CircuitSpec, run_cli
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-pot_100k = components.DigitalPot(100000, 100)
-pot_10k = components.DigitalPot(10000, 100)
+# An X9C104 in series with an X9C103 per resistor: eight parts.
+POT_SPECS = [(100000, 100), (10000, 100)] * 4
+pot_100k = components.DigitalPot(*POT_SPECS[0])
+pot_10k = components.DigitalPot(*POT_SPECS[1])
 
 
 def resistor_mapper(solution) -> list:
