@@ -79,6 +79,9 @@ def _parse_resistors_field(value):
         return value
 
 def dump_json_to_csv(csv_file, json_data):
+    directory = os.path.dirname(csv_file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     row = _normalize_row_for_dump(json_data)
 
     file_exists = os.path.isfile(csv_file)

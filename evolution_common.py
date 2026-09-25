@@ -8,6 +8,7 @@ it isn't duplicated (and doesn't drift) between the 4R and 8R scripts.
 """
 import argparse
 import json
+import os
 import logging
 import time
 import uuid
@@ -336,6 +337,7 @@ class EvolutionRun:
             )
 
         # Save per-generation fitness history so plots can be regenerated later.
+        os.makedirs(out_dir, exist_ok=True)
         target_slug = self.spec.evaluator.target_slug(self.target)
         fitness_history_path = (
             f'{out_dir}/fitness_history_{self.spec.circuit_name}'
