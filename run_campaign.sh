@@ -47,7 +47,7 @@ for family in filter amp; do
   t0=$(date +%s)
   PYTHONPATH=. venv/bin/python -u campaign.py \
       --family "$family" --seeds "$SEEDS" --shard "$SHARD" \
-      --data-csv "$csv" --out "$RESULTS/${family}_${TAG}.json" \
+      --data-csv "$csv" \
       --out-dir "$RESULTS/runs" "$@" 2>&1 | tee "$log"
   echo "   $family levou $(( ($(date +%s) - t0) / 60 )) min"
 done
@@ -55,7 +55,7 @@ done
 echo
 echo "campanha concluida em $(( ($(date +%s) - started) / 60 )) min"
 echo "resultados em $RESULTS/:"
-ls -la "$RESULTS"/*.csv "$RESULTS"/*.json 2>/dev/null || true
+ls -la "$RESULTS"/*.csv 2>/dev/null || true
 echo
 echo "quando todas as maquinas terminarem, junte os CSVs de mesma familia:"
 echo "  head -1 filter_1de2.csv > filter_all.csv"

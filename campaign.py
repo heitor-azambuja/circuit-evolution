@@ -20,6 +20,8 @@ Split across machines with --shard, which partitions the job list by index:
     python campaign.py --family filter --seeds 100 --shard 2/3 --data-csv m2.csv
 
 Each shard writes a disjoint set of rows; concatenate the CSVs when they finish.
+The CSV is the only output, and it is appended run by run: an interrupted
+campaign keeps everything it had already finished.
 """
 import argparse
 import json
@@ -28,7 +30,11 @@ import resource
 
 import numpy as np
 
-_ADDRESS_SPACE_MB = 3000
+# Address space, not resident memory: numpy and scipy reserve large virtual
+# mappings, so this has to be generous or a worker can fail during import. A
+# tolerance study deadlocked at 2 GB. It exists only to stop a runaway leak from
+# taking the host down -- a run's actual footprint is well under a gigabyte.
+_ADDRESS_SPACE_MB = 12000
 
 FAMILIES = {
     'filter': {'modules': ('filter_sk4_evolution', 'filter_sk8_evolution')},
@@ -93,6 +99,9 @@ def _run_one(job) -> dict:
     solution = json.loads(data['solution'])
     metrics = spec.evaluator.metrics(run.circuit, spec.resistor_mapper(solution), target)
     data.update(spec.evaluator.metric_fields(metrics))
+    # Always present, so every row carries the same columns; the CSV appends
+    # against the header already on disk and would drop a key that shows up late.
+    data.setdefault('fitness_eval_failures', 0)
     data['family'] = family
     data['variant'] = variant
     data['target'] = str(target)
@@ -152,8 +161,8 @@ def main() -> None:
     parser.add_argument('--patience', type=int, default=None,
                         help='Off by default, and it should stay off here')
     parser.add_argument('--out-dir', default='simulations')
-    parser.add_argument('--data-csv')
-    parser.add_argument('--out')
+    parser.add_argument('--data-csv', required=True,
+                        help='Every run is appended here as it finishes')
     parser.add_argument('--shard', default='1/1',
                         help='i/N — run only the i-th of N disjoint slices')
     args = parser.parse_args()
@@ -165,10 +174,6 @@ def main() -> None:
     results = run(args.family, args.seeds, args.out_dir, args.workers,
                   args.patience, args.data_csv, (index, total))
     summarize(args.family, results)
-
-    if args.out:
-        with open(args.out, 'w') as handle:
-            json.dump(results, handle, indent=2, default=str)
 
 
 if __name__ == '__main__':
