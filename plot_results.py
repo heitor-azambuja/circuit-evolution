@@ -16,23 +16,39 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-import circuits
 import data_parse
 import evaluate_sims
-import evolution_common
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_amp(ckt_name: str):
-    if '8r' in ckt_name:
-        amp = circuits.BJTClassAAmp8R()
-    else:
-        amp = circuits.BJTClassAAmp()
-    amp.configure_capacitors(47, 100, 47)
-    return amp
+def _specs() -> dict:
+    """Every known circuit, keyed by the ckt_name written into the CSV.
+
+    The run scripts' own SPECs are the registry, so a circuit can never be
+    described in two places — and an unknown ckt_name is skipped rather than
+    silently plotted as some other circuit.
+    """
+    import amp_4r_evolution
+    import amp_8r_evolution
+    import filter_sk4_evolution
+    import filter_sk8_evolution
+
+    return {spec.circuit_name: spec for spec in (
+        amp_4r_evolution.SPEC,
+        amp_8r_evolution.SPEC,
+        filter_sk4_evolution.SPEC,
+        filter_sk8_evolution.SPEC,
+    )}
+
+
+def _build_circuit(spec, target):
+    circuit = spec.circuit_factory()
+    if spec.setup_hook is not None:
+        spec.setup_hook(circuit, target)
+    return circuit
 
 
 def _get_resistances(row: dict, ckt_name: str):
@@ -54,33 +70,41 @@ def _get_resistances(row: dict, ckt_name: str):
 # ---------------------------------------------------------------------------
 
 def regenerate_waveforms(rows: list, out_dir: str = 'simulations') -> None:
-    print('=== Regenerating waveform plots ===')
+    print('=== Regenerating result plots ===')
+    specs = _specs()
 
     for row in rows:
-        ckt_name    = row.get('ckt_name', '')
-        desired_gain = evaluate_sims.parse_float(row.get('desired_gain'))
+        ckt_name     = row.get('ckt_name', '')
         exec_counter = row.get('exec_counter', '?')
         seed         = row.get('seed', '')
 
+        spec = specs.get(ckt_name)
+        if spec is None:
+            print(f'  [skip] exec={exec_counter} — unknown circuit {ckt_name!r}')
+            continue
+
+        evaluator = spec.evaluator
+        target = evaluator.target_from_row(row)
         resistances = _get_resistances(row, ckt_name)
-        if resistances is None or desired_gain is None:
-            print(f'  [skip] exec={exec_counter} — missing resistors or gain')
+        if resistances is None or target is None:
+            print(f'  [skip] exec={exec_counter} — missing resistors or target')
             continue
 
         try:
-            amp = _build_amp(ckt_name)
-            metrics = evolution_common.compute_metrics(amp, resistances, desired_gain)
+            circuit = _build_circuit(spec, target)
+            metrics = evaluator.metrics(circuit, resistances, target)
         except Exception as exc:
             print(f'  [error] exec={exec_counter}: {exc}')
             continue
 
-        label = '(8R)' if '8r' in ckt_name else ''
         title = (
-            f'BJT Class A Amplifier {label} — Gain = {desired_gain:.0f}   '
+            f'{spec.display_name} — {evaluator.target_label(target)}   '
             f'(exec {exec_counter}, seed {seed})'
         )
-        path = os.path.join(out_dir, f'{ckt_name}_gain{desired_gain:.0f}_execution{exec_counter}.png')
-        evolution_common.plot_waveforms(metrics, path, title)
+        path = os.path.join(
+            out_dir,
+            f'{ckt_name}_{evaluator.target_slug(target)}_execution{exec_counter}.png')
+        evaluator.plot(metrics, path, title)
         print(f'  [saved] {path}')
 
 
@@ -103,8 +127,9 @@ def regenerate_fitness_plots(out_dir: str = 'simulations') -> None:
 
         history     = data.get('best_solutions_fitness', [])
         ckt_name    = data.get('ckt_name', 'unknown')
-        desired_gain = data.get('desired_gain', '?')
         exec_counter = data.get('exec_counter', '?')
+        # Runs before the filter target only recorded the gain.
+        target_slug = data.get('target_slug') or f"gain{data.get('desired_gain', '?')}"
 
         if not history:
             continue
@@ -114,13 +139,13 @@ def regenerate_fitness_plots(out_dir: str = 'simulations') -> None:
         ax.set_xlabel('Generation', fontsize=11)
         ax.set_ylabel('Fitness', fontsize=11)
         ax.set_title(
-            f'Fitness — {ckt_name} gain={desired_gain} exec={exec_counter}',
+            f'Fitness — {ckt_name} {target_slug} exec={exec_counter}',
             fontsize=11
         )
         ax.grid(True, linestyle=':', alpha=0.6)
 
         save_path = os.path.join(
-            out_dir, f'fitness_{ckt_name}_gain{desired_gain}_execution{exec_counter}.png'
+            out_dir, f'fitness_{ckt_name}_{target_slug}_execution{exec_counter}.png'
         )
         fig.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close(fig)

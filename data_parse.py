@@ -1,8 +1,11 @@
-import os
 import csv
 import json
-from datetime import datetime
+import logging
+import os
 import uuid
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 RUN_FIELDS = [
     'run_id',
@@ -79,17 +82,34 @@ def _parse_resistors_field(value):
         return value
 
 def dump_json_to_csv(csv_file, json_data):
+    directory = os.path.dirname(csv_file)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     row = _normalize_row_for_dump(json_data)
 
-    file_exists = os.path.isfile(csv_file)
+    # Append against the header already on disk, not against this row's keys.
+    # Rows do not all carry the same keys -- fitness_eval_failures only appears
+    # when a run had SPICE failures -- and writing each row against its own keys
+    # silently produces a ragged file: extra values land past the last column.
+    header = None
+    if os.path.isfile(csv_file):
+        with open(csv_file, newline='') as file:
+            header = next(csv.reader(file), None)
 
     with open(csv_file, 'a', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=row.keys())
-
-        if not file_exists:
+        if header is None:
+            header = list(row.keys())
+            writer = csv.DictWriter(file, fieldnames=header)
             writer.writeheader()
+        else:
+            writer = csv.DictWriter(file, fieldnames=header)
+            dropped = [key for key in row if key not in header]
+            if dropped:
+                logger.warning(
+                    f'{csv_file} has no column for {dropped}; those values are '
+                    f'not being recorded. Delete the file to rebuild its header.')
 
-        writer.writerow(row)
+        writer.writerow({key: row.get(key, '') for key in header})
 
 
 def load_csv_to_json(csv_file):

@@ -1,0 +1,33 @@
+* ---------------------------------------------------------------------------
+* MCP6002 -- small-signal macromodel, from Microchip DS20001733L (typicals).
+* Terminals: non-inverting input, inverting input, output.
+*
+*   A_OL   = 112 dB -> 398107 V/V     DC Open-Loop Gain (large signal)
+*   GBWP   = 1.0 MHz                  Gain Bandwidth Product
+*   f_pole = GBWP / A_OL = 2.512 Hz   dominant pole (Rdom/Cdom below)
+*   Z_CM   = 1E13 ohm || 6 pF         common-mode input impedance
+*   Z_DIFF = 1E13 ohm || 3 pF         differential input impedance
+*
+* Single-pole is not a shortcut here: the datasheet gives 90 deg of phase margin
+* at G = +1 V/V, so in the unity-gain buffer this project uses the part behaves
+* as a one-pole system and the next pole sits well above the 1 MHz crossover.
+*
+* Left out on purpose:
+*   input offset (+/-4.5 mV), slew rate (0.6 V/us) and output swing
+*     (Vss+25 mV .. Vdd-25 mV) are invisible to a small-signal AC analysis,
+*     which is linear by construction;
+*   CMRR (76 dB), PSRR (86 dB) and input noise (28 nV/rtHz at 1 kHz) are real
+*     but each sits far below the magnitude errors this study resolves;
+*   output impedance is not specified in the datasheet, and guessing it would
+*     put an unverifiable number into the model.
+* ---------------------------------------------------------------------------
+.SUBCKT MCP6002 inp inn out
+Rcmp    inp inn   1E13
+Ccmp    inp 0     6P
+Ccmn    inn 0     6P
+Cdiff   inp inn   3P
+Eol     amp 0     inp inn 398107
+Rdom    amp flt   1K
+Cdom    flt 0     63.3608U
+Ebuf    out 0     flt 0   1
+.ENDS MCP6002
