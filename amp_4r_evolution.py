@@ -15,12 +15,18 @@ def resistor_mapper(solution) -> list:
     return [pot_100k.get_resistance(value) for value in solution]
 
 
+def configure(circuit, target) -> None:
+    """Coupling/bypass capacitors in µF; independent of the gain being targeted."""
+    circuit.configure_capacitors(47, 100, 47)
+
+
 SPEC = CircuitSpec(
     circuit_name='bjt_class_a_amp_4r',
     display_name='BJT Class A Amplifier',
     circuit_factory=circuits.BJTClassAAmp,
     num_genes=4,
     resistor_mapper=resistor_mapper,
+    setup_hook=configure,
     default_population=20,
     default_generations=400,
 )
