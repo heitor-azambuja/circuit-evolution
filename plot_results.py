@@ -34,11 +34,13 @@ def _specs() -> dict:
     import amp_4r_evolution
     import amp_8r_evolution
     import filter_sk4_evolution
+    import filter_sk8_evolution
 
     return {spec.circuit_name: spec for spec in (
         amp_4r_evolution.SPEC,
         amp_8r_evolution.SPEC,
         filter_sk4_evolution.SPEC,
+        filter_sk8_evolution.SPEC,
     )}
 
 

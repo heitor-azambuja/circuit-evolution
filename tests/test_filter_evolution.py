@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import scipy.signal
 
+import circuits
 import evolution_common
 import filter_design
 import filter_evaluation
@@ -35,8 +36,10 @@ class _FakeFilter:
     """Stub filter whose response is a chosen analog transfer function, no SPICE."""
 
     def __init__(self, num, den, freqs=None):
-        self.num = num
-        self.den = den
+        # A cascade of unity-gain stages has gain 1 at DC, whatever its poles, so
+        # the stub is normalised the same way the real circuit is constrained.
+        self.num = np.asarray(num, dtype=float) / (num[-1] / den[-1])
+        self.den = np.asarray(den, dtype=float)
         self.freqs = _sweep_freqs() if freqs is None else freqs
         self.resistances = None
         self.capacitors = None
@@ -81,6 +84,30 @@ def test_target_curve_matches_scipy_independently():
     produced = _evaluator().target_db(freqs, 'butterworth')
 
     assert np.allclose(produced, 20 * np.log10(np.abs(h)))
+
+
+def test_every_target_is_normalised_to_unity_gain_at_dc():
+    """A unity-gain cascade sits at 0 dB at DC; an even-order Chebyshev does not.
+
+    Without this normalisation the circuit is charged a constant offset across the
+    whole passband that no choice of resistors could ever remove.
+    """
+    evaluator = _evaluator()
+    near_dc = np.array([1e-3, 1e-2])
+    for target in TARGETS:
+        assert evaluator.target_db(near_dc, target) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_normalisation_shifts_chebyshev_but_not_butterworth():
+    evaluator = _evaluator()
+    freqs = _sweep_freqs()
+
+    b, a = scipy.signal.cheby1(4, 0.5, 2 * np.pi * FC, btype='low', analog=True)
+    _, h = scipy.signal.freqs(b, a, worN=2 * np.pi * freqs)
+    raw_db = 20 * np.log10(np.abs(h))
+
+    shift = evaluator.target_db(freqs, 'chebyshev') - raw_db
+    assert shift == pytest.approx(0.5, abs=1e-6)
 
 
 def test_chebyshev_target_differs_from_butterworth():
@@ -193,7 +220,54 @@ def test_every_run_script_registers_a_distinct_circuit_name():
 
     specs = plot_results._specs()
     assert 'sallen_key_lp_4p' in specs
-    assert len(specs) == 3
+    assert 'sallen_key_lp_4p_8r' in specs
+    assert len(specs) == 4
+
+
+def test_8r_mapper_sums_a_coarse_and_a_fine_pot_per_resistor():
+    import filter_sk8_evolution as sk8
+
+    solution = [50, 20, 30, 80, 90, 10, 60, 40]
+    expected = [
+        sk8.pot_10k.get_resistance(50) + sk8.pot_1k.get_resistance(20),
+        sk8.pot_10k.get_resistance(30) + sk8.pot_1k.get_resistance(80),
+        sk8.pot_10k.get_resistance(90) + sk8.pot_1k.get_resistance(10),
+        sk8.pot_10k.get_resistance(60) + sk8.pot_1k.get_resistance(40),
+    ]
+    assert sk8.resistor_mapper(solution) == expected
+
+
+def test_8r_mapper_feeds_the_circuit_four_resistances_from_eight_genes():
+    """The circuit is unchanged — only how each resistance is realized differs."""
+    import filter_sk8_evolution as sk8
+
+    assert sk8.SPEC.num_genes == 8
+    assert len(sk8.resistor_mapper([50] * 8)) == 4
+    assert sk8.SPEC.circuit_factory is circuits.SallenKeyLowPass
+
+
+def test_both_filter_variants_share_the_same_targets_and_capacitors():
+    """Holding the capacitors fixed is what makes 4R vs 8R a resolution comparison."""
+    import filter_sk4_evolution as sk4
+    import filter_sk8_evolution as sk8
+
+    assert sk4.SPEC.setup_hook is sk8.SPEC.setup_hook
+    assert sk4.SPEC.evaluator.targets is sk8.SPEC.evaluator.targets
+
+
+def test_8r_realizes_the_ideal_resistors_more_closely_than_4r():
+    import filter_baseline
+    import filter_sk4_evolution as sk4
+    import filter_sk8_evolution as sk8
+
+    coarse = filter_baseline.design(sk4, 'chebyshev')
+    fine = filter_baseline.design(sk8, 'chebyshev')
+
+    ideal = np.array(coarse['ideal_resistors'])
+    error_4r = np.abs(np.array(coarse['quantized_resistors']) - ideal).max()
+    error_8r = np.abs(np.array(fine['quantized_resistors']) - ideal).max()
+
+    assert error_8r < error_4r
 
 
 def test_evolution_run_drives_the_filter_evaluator():

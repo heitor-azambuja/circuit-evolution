@@ -45,6 +45,7 @@ class AcResponseEvaluator:
 
         # The reference transfer function per target is fixed for the whole run.
         self._coefficients = {}
+        self._dc_gain_db = {}
         for name, spec in targets.items():
             wn = 2 * np.pi * fc_hz
             if spec['response'] == filter_design.BUTTERWORTH:
@@ -56,10 +57,23 @@ class AcResponseEvaluator:
             else:
                 raise ValueError(f'unknown response for target {name!r}')
 
+            b, a = self._coefficients[name]
+            self._dc_gain_db[name] = 20 * np.log10(np.abs(b[-1] / a[-1]))
+
     def target_db(self, freqs, target) -> np.ndarray:
+        """Target magnitude, normalised to unity gain at DC.
+
+        An even-order Chebyshev I is defined with its ripple peaks at 0 dB, so it
+        sits at -ripple dB at DC. A cascade of unity-gain Sallen-Key stages is at
+        exactly 0 dB there and physically cannot do otherwise, so comparing
+        against the unnormalised curve would charge the circuit a constant offset
+        across the whole passband — an error no choice of resistors can fix.
+        Butterworth and odd-order Chebyshev already have unity DC gain, so this
+        leaves them untouched.
+        """
         b, a = self._coefficients[target]
         _, h = scipy.signal.freqs(b, a, worN=2 * np.pi * np.asarray(freqs))
-        return 20 * np.log10(np.abs(h))
+        return 20 * np.log10(np.abs(h)) - self._dc_gain_db[target]
 
     def weights(self, freqs) -> np.ndarray:
         freqs = np.asarray(freqs)

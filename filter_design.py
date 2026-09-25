@@ -108,3 +108,24 @@ def quantize_to_pot(values, pot) -> list:
         tap = int(round(value / pot.min_value)) + 1
         taps.append(max(1, min(pot.tap_points, tap)))
     return taps
+
+
+def quantize_to_series_pots(values, coarse, fine) -> list:
+    """Nearest (coarse tap, fine tap) pair per value, for two pots wired in series.
+
+    Returned interleaved as [coarse, fine, coarse, fine, ...] to match the gene
+    order the 8-gene mappers use. Searched exhaustively: the tap counts are small,
+    and an exact answer is worth more here than a closed form that has to reason
+    about where the two step sizes interleave.
+    """
+    taps = []
+    for value in values:
+        best = None
+        for c in range(1, coarse.tap_points + 1):
+            base = coarse.get_resistance(c)
+            for f in range(1, fine.tap_points + 1):
+                error = abs(base + fine.get_resistance(f) - value)
+                if best is None or error < best[0]:
+                    best = (error, c, f)
+        taps.extend([best[1], best[2]])
+    return taps

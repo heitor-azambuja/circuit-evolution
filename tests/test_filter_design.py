@@ -129,3 +129,42 @@ def test_quantize_to_pot_round_trips_through_get_resistance():
 def test_quantize_to_pot_saturates_at_both_ends():
     pot = components.DigitalPot(10000, 100)
     assert filter_design.quantize_to_pot([-500.0, 1e9], pot) == [1, pot.tap_points]
+
+
+def _series_pots():
+    return components.DigitalPot(10000, 100), components.DigitalPot(1000, 100)
+
+
+def test_series_pots_return_one_tap_pair_per_value():
+    coarse, fine = _series_pots()
+    taps = filter_design.quantize_to_series_pots([5000.0, 3000.0], coarse, fine)
+    assert len(taps) == 4
+
+
+def test_series_pots_beat_a_single_pot_on_the_same_target():
+    """The whole reason for the 8R variant: a second pot buys a finer step."""
+    coarse, fine = _series_pots()
+    # Halfway between two coarse taps (5050.5 and 5151.5). The fine step is exactly
+    # a tenth of the coarse one, so a target near a coarse tap is reachable either
+    # way and would not tell the two apart.
+    target = 5101.0
+
+    single = coarse.get_resistance(filter_design.quantize_to_pot([target], coarse)[0])
+    c, f = filter_design.quantize_to_series_pots([target], coarse, fine)
+    series = coarse.get_resistance(c) + fine.get_resistance(f)
+
+    assert abs(series - target) < abs(single - target)
+
+
+def test_series_pots_land_within_half_the_fine_step():
+    coarse, fine = _series_pots()
+    for target in (1000.0, 2500.0, 5000.0, 7777.0, 9000.0):
+        c, f = filter_design.quantize_to_series_pots([target], coarse, fine)
+        realized = coarse.get_resistance(c) + fine.get_resistance(f)
+        assert abs(realized - target) <= fine.min_value / 2 + 1e-9
+
+
+def test_series_pots_saturate_above_the_combined_range():
+    coarse, fine = _series_pots()
+    taps = filter_design.quantize_to_series_pots([1e9], coarse, fine)
+    assert taps == [coarse.tap_points, fine.tap_points]
