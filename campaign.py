@@ -22,10 +22,25 @@ Split across machines with --shard, which partitions the job list by index:
 Each shard writes a disjoint set of rows; concatenate the CSVs when they finish.
 The CSV is the only output, and it is appended run by run: an interrupted
 campaign keeps everything it had already finished.
+
+--variant and --population exist for one reason: the two variants do not default
+to the same search budget. 4R evolves 4 genes with a population of 20 and 8R
+evolves 8 with a population of 40, so a straight 4R-vs-8R result confounds
+resistor resolution with the number of evaluations each variant was given. To
+separate them, re-run one variant at the other's population and compare against
+its own earlier rows:
+
+    python campaign.py --family filter --variant 4R --population 40 \
+        --seeds 100 --data-csv control_4r_pop40.csv --out-dir simulations/control
+
+Every row records the population it ran with, so the control and the original are
+distinguishable in the CSV without tracking which file came from which command.
 """
 import argparse
+import glob
 import json
 import multiprocessing
+import os
 import resource
 
 import numpy as np
@@ -85,12 +100,12 @@ def baseline_taps(family: str, variant: str, target) -> list:
 
 
 def _run_one(job) -> dict:
-    family, variant, target, seed, out_dir, patience = job
+    family, variant, target, seed, out_dir, patience, population = job
 
     import evolution_common
     spec = _module(family, variant).SPEC
     run = evolution_common.EvolutionRun(spec, target=target, exec_counter=seed, seed=seed)
-    data = run.evolve(spec.default_generations, spec.default_population,
+    data = run.evolve(spec.default_generations, population or spec.default_population,
                       auto_plots=False, out_dir=out_dir, patience=patience)
 
     # One extra evaluation buys every result metric for the winning solution.
@@ -109,11 +124,12 @@ def _run_one(job) -> dict:
 
 
 def run(family: str, seeds: int, out_dir: str, workers: int, patience,
-        data_csv: str, shard: tuple) -> list:
+        data_csv: str, shard: tuple, variants: tuple = VARIANTS,
+        population: int = None) -> list:
     import data_parse
 
-    jobs = [(family, variant, target, seed, out_dir, patience)
-            for variant in VARIANTS for target in targets_of(family)
+    jobs = [(family, variant, target, seed, out_dir, patience, population)
+            for variant in variants for target in targets_of(family)
             for seed in range(1, seeds + 1)]
     index, total = shard
     jobs = jobs[index - 1::total]
@@ -153,11 +169,60 @@ def summarize(family: str, results: list) -> None:
               f'{int((fitnesses > baseline).sum())}/{len(rows)}')
 
 
+def warn_about_history_collisions(family: str, variants: tuple, out_dir: str,
+                                  population: int) -> list:
+    """Warn when a re-run would overwrite fitness histories already in `out_dir`.
+
+    The per-run history filename is built from circuit, target and seed only -- not
+    from the population -- so a control run at a different population writes over
+    the histories of the campaign it is meant to be compared against. The CSV rows
+    are safe either way, since the campaign appends those, but the histories are the
+    record behind every convergence plot. Returns the paths that would be lost.
+
+    It fires whenever --population differs from the variant's own default and any
+    matching history exists, which is deliberately conservative: nothing on disk
+    records the population a history came from, so the alternative to warning too
+    often is overwriting silently.
+    """
+    if population is None:
+        return []
+
+    doomed = []
+    for variant in variants:
+        spec = _module(family, variant).SPEC
+        if population == spec.default_population:
+            continue
+        for target in targets_of(family):
+            slug = spec.evaluator.target_slug(target)
+            pattern = os.path.join(
+                out_dir, f'fitness_history_{spec.circuit_name}_{slug}_execution*.json')
+            doomed.extend(glob.glob(pattern))
+
+    if doomed:
+        # Nothing on disk records the population a history was produced with, so this
+        # cannot tell whether the existing files came from a different one. It reports
+        # what it does know: these runs will overwrite those files.
+        print(f'WARNING: this run will overwrite {len(doomed)} fitness history '
+              f'file(s) already in {out_dir}/. The filenames are built from circuit, '
+              f'target and seed only, so a run at population {population} cannot '
+              f'coexist there with whatever wrote them.', flush=True)
+        print(f'         Pass a separate --out-dir (for example '
+              f'{out_dir.rstrip("/")}-pop{population}) to keep both.', flush=True)
+    return doomed
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-f', '--family', choices=sorted(FAMILIES), required=True)
     parser.add_argument('-s', '--seeds', type=int, default=100)
     parser.add_argument('-w', '--workers', type=int, default=6)
+    parser.add_argument('--variant', choices=VARIANTS, action='append',
+                        help='Run only this variant; repeat for several. Default: both')
+    parser.add_argument('--population', type=int,
+                        help='Override the population both variants would otherwise '
+                             'take from their own spec (4R: 20, 8R: 40). Use it to '
+                             'give the variants a matched search budget')
     parser.add_argument('--patience', type=int, default=None,
                         help='Off by default, and it should stay off here')
     parser.add_argument('--out-dir', default='simulations')
@@ -170,9 +235,15 @@ def main() -> None:
     index, total = (int(part) for part in args.shard.split('/'))
     if not 1 <= index <= total:
         parser.error(f'shard {args.shard} is out of range')
+    if args.population is not None and args.population < 4:
+        parser.error('a population below 4 leaves nothing to mate')
+
+    variants = tuple(dict.fromkeys(args.variant)) if args.variant else VARIANTS
+    warn_about_history_collisions(args.family, variants, args.out_dir, args.population)
 
     results = run(args.family, args.seeds, args.out_dir, args.workers,
-                  args.patience, args.data_csv, (index, total))
+                  args.patience, args.data_csv, (index, total),
+                  variants=variants, population=args.population)
     summarize(args.family, results)
 
 

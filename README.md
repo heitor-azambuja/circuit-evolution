@@ -120,6 +120,28 @@ Process isolation is not tidiness: PySpice leaks about 47 kB per simulation and
 never returns it, so a run costs a few hundred megabytes that only a process exit
 reclaims.
 
+`--variant` and `--population` exist to break one confound. In **both** families the
+two variants default to different search budgets — 4R evolves 4 genes with a
+population of 20, 8R evolves 8 with a population of 40 — so a plain 4R-vs-8R result
+mixes resistor resolution with the number of evaluations each side was allowed.
+Re-run one variant at the other's population to separate them:
+
+```bash
+RESULTS=results-control FAMILIES=filter \
+    ./run_campaign.sh 1/1 --variant 4R --population 40
+RESULTS=results-control FAMILIES=amp \
+    ./run_campaign.sh 1/1 --variant 4R --population 40
+```
+
+Or `FAMILIES="filter amp"` for both in one go — they write separate CSVs.
+
+Every row records the population it ran with, so a control and the original campaign
+stay distinguishable inside the CSV. Keep them in separate output directories
+though: fitness history filenames are built from circuit, target and seed only, so a
+control writes over the histories it is meant to be compared against. `campaign.py`
+warns when it is about to, counting only the files the families and variants being
+run would actually touch.
+
 ### analyze_campaign.py
 Statistics for the finished campaign in `simulations/campaign/`, which
 `evaluate_sims.py` cannot describe because it is shaped around the amplifier's
