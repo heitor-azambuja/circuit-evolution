@@ -21,12 +21,25 @@ from filter_targets import ORDER, TARGETS, configure
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-pot_10k = components.DigitalPot(10000, 100)   # X9C103
+# One X9C103 per filter resistor, so four independent parts on a board.
+POT_SPECS = [(10000, 100)] * 4
+pot_10k = components.DigitalPot(*POT_SPECS[0])
 
 
-def resistor_mapper(solution) -> list:
-    """Order: R1a, R2a (low-Q stage), R1b, R2b (high-Q stage)."""
-    return [pot_10k.get_resistance(value) for value in solution]
+def make_resistor_mapper(pots):
+    """Build a mapper over these specific pot instances.
+
+    Taking the pots as an argument is what lets a tolerance study hand in parts
+    whose end-to-end resistance deviates from nominal, one draw per board.
+    """
+    def resistor_mapper(solution) -> list:
+        """Order: R1a, R2a (low-Q stage), R1b, R2b (high-Q stage)."""
+        return [pot.get_resistance(value) for pot, value in zip(pots, solution)]
+    return resistor_mapper
+
+
+resistor_mapper = make_resistor_mapper([components.DigitalPot(*spec)
+                                        for spec in POT_SPECS])
 
 
 def quantize(resistances) -> list:

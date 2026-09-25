@@ -24,14 +24,24 @@ from filter_targets import ORDER, TARGETS, configure
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-pot_10k = components.DigitalPot(10000, 100)   # X9C103, coarse
-pot_1k = components.DigitalPot(1000, 100)     # X9C102, fine
+# An X9C103 in series with an X9C102 per filter resistor: eight parts on a board.
+POT_SPECS = [(10000, 100), (1000, 100)] * 4
+pot_10k = components.DigitalPot(*POT_SPECS[0])
+pot_1k = components.DigitalPot(*POT_SPECS[1])
 
 
-def resistor_mapper(solution) -> list:
-    """Order: coarse/fine pairs for R1a, R2a, R1b, R2b — each resistor is a series pair."""
-    return [pot_10k.get_resistance(solution[i]) + pot_1k.get_resistance(solution[i + 1])
-            for i in range(0, 8, 2)]
+def make_resistor_mapper(pots):
+    """Build a mapper over these specific pot instances — see the 4R script."""
+    def resistor_mapper(solution) -> list:
+        """Order: coarse/fine pairs for R1a, R2a, R1b, R2b."""
+        return [pots[i].get_resistance(solution[i])
+                + pots[i + 1].get_resistance(solution[i + 1])
+                for i in range(0, 8, 2)]
+    return resistor_mapper
+
+
+resistor_mapper = make_resistor_mapper([components.DigitalPot(*spec)
+                                        for spec in POT_SPECS])
 
 
 def quantize(resistances) -> list:
