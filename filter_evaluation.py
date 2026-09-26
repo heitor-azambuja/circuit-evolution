@@ -123,6 +123,14 @@ class AcResponseEvaluator:
             'max_passband_error_db': float(np.max(np.abs(
                 response_db[passband] - reference_db[passband]))),
             'cutoff_realized_hz': _minus_3db_crossing(freqs, response_db),
+            # The -3 dB point of the *ideal* response, which is the only defensible
+            # thing to measure the realized one against. For a Chebyshev I the
+            # nominal cutoff is the ripple-band edge, and the ideal response's own
+            # -3 dB point sits above it -- about 10% for order 4 at 0.5 dB -- so
+            # comparing against `cutoff` reports that offset as if it were error.
+            # Measured on the same grid with the same interpolation as the realized
+            # one, so whatever the coarse sweep costs cancels between the two.
+            'cutoff_reference_hz': _minus_3db_crossing(freqs, reference_db),
             # Interpolated in log-frequency: the sweep grid is logarithmic, and
             # 10*fc only lands exactly on it for particular sweep parameters.
             'attenuation_at_10fc_db': float(np.interp(
@@ -143,11 +151,12 @@ class AcResponseEvaluator:
     def metric_fields(self, metrics: dict) -> dict:
         fields = {key: metrics[key] for key in (
             'rmse_db', 'max_passband_error_db', 'cutoff_realized_hz',
-            'attenuation_at_10fc_db')}
-        cutoff = metrics['cutoff_target_hz']
+            'cutoff_reference_hz', 'attenuation_at_10fc_db')}
+        realized = metrics['cutoff_realized_hz']
+        reference = metrics['cutoff_reference_hz']
         fields['cutoff_error_percent'] = (
-            (metrics['cutoff_realized_hz'] - cutoff) / cutoff * 100
-            if metrics['cutoff_realized_hz'] is not None else None
+            (realized - reference) / reference * 100
+            if realized is not None and reference else None
         )
         fields['resistors'] = metrics['resistances']
         return fields
@@ -203,10 +212,12 @@ def _plot_response(metrics: dict, save_path: str, title: str, fc_hz: float) -> N
 
     res_str = ', '.join(f'{r/1000:.2f}k' for r in metrics['resistances'])
     realized = metrics['cutoff_realized_hz']
+    reference = metrics.get('cutoff_reference_hz')
     lines = [
         f"weighted rmse: {metrics['rmse_db']:.3f} dB",
         f"max passband err: {metrics['max_passband_error_db']:.3f} dB",
-        f'fc realized: {realized:.1f} Hz' if realized is not None
+        f'fc realized: {realized:.1f} Hz (ideal {reference:.1f} Hz)'
+        if realized is not None and reference is not None
         else 'fc realized: not reached',
         f'R: [{res_str}] Ω',
     ]

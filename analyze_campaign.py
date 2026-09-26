@@ -26,9 +26,12 @@ import numpy as np
 import scipy.signal
 from scipy import stats
 
+import filter_evaluation
+
 from filter_targets import ORDER, TARGETS
 
 CAMPAIGN_DIR = 'simulations/campaign'
+CONTROL_DIR = 'simulations/control'
 FAMILIES = ('butterworth', 'chebyshev')
 CUTOFFS = (1000, 1500, 2000, 3000)
 GAINS = (5, 10, 15, 20)
@@ -193,10 +196,19 @@ def versus_baseline(by: dict, baseline_path: str) -> None:
 
 
 def ideal_minus_3db(target: str) -> float:
-    """The -3 dB frequency of the ideal response, DC-normalized as the evaluator is.
+    """The -3 dB frequency of the ideal response, as the evaluator would measure it.
 
-    For Chebyshev I the nominal cutoff is the ripple-band edge, so this is the only
-    defensible reference for a realized -3 dB measurement.
+    Two things make this the right reference. First, for a Chebyshev I the nominal
+    cutoff is the ripple-band edge, and the ideal response's own -3 dB point sits
+    about 10% above it, so the nominal figure is not a reference at all.
+
+    Second, it is measured on the *same* sweep grid and with the same log
+    interpolation the evaluator uses for the realized crossing. That grid is coarse
+    -- 20 points per decade -- and reading a -3 dB crossing off it is biased by up to
+    0.8% depending on where the crossing falls between samples. Since both sides
+    carry the same bias, the difference between them does not: an exactly-ideal
+    filter reads as zero error. Pairing a coarse realized value with a dense-grid
+    reference would instead report that bias as filter error.
     """
     spec = TARGETS[target]
     if spec['response'] == 'butterworth':
@@ -205,11 +217,18 @@ def ideal_minus_3db(target: str) -> float:
     else:
         b, a = scipy.signal.cheby1(ORDER, spec['ripple_db'], 2 * np.pi * spec['cutoff_hz'],
                                    btype='low', analog=True)
-    freqs = np.linspace(0.5 * spec['cutoff_hz'], 2.0 * spec['cutoff_hz'], 400001)
+    freqs = _sweep_grid()
     _, h = scipy.signal.freqs(b, a, worN=2 * np.pi * freqs)
     db = 20 * np.log10(np.abs(h))
     db -= db[0]
-    return float(freqs[np.argmin(np.abs(db + 3))])
+    return filter_evaluation._minus_3db_crossing(freqs, db)
+
+
+def _sweep_grid(start: float = 10.0, stop: float = 100_000.0,
+                points_per_decade: int = 20) -> np.ndarray:
+    """The AC sweep the evaluator runs, which the CSV's realized cutoff comes from."""
+    decades = np.log10(stop / start)
+    return start * 10 ** np.linspace(0, decades, int(decades * points_per_decade) + 1)
 
 
 def cutoff_accuracy(filter_rows: list) -> None:
@@ -283,6 +302,120 @@ def amplifier(amp_rows: list) -> None:
                       f'swing {high - low:>7.3f}  best gen {best_gen:>4.0f}')
 
 
+def _cell_order(cell: str):
+    """Sort filter cells by family then cutoff, and amp cells numerically by gain."""
+    family, _, cutoff = cell.rpartition('_')
+    if family and cutoff.isdigit():
+        return (family, int(cutoff))
+    return ('', float(cell)) if cell.replace('.', '', 1).isdigit() else (cell, 0)
+
+
+def matched_budget(campaign_dir: str, control_dir: str) -> None:
+    """4R re-run at 8R's population, against 8R -- the confound `budget` reports.
+
+    Until this comparison exists, a 4R-vs-8R difference mixes resistor resolution
+    with the number of evaluations each variant was allowed. With both at the same
+    population, whatever remains is resolution.
+    """
+    print('\n== Matched budget: 4R re-run at 8R\'s population ==')
+    pairs = (('filter', 'filter_all.csv', 'filter_control.csv', 'rmse_db', 'target'),
+             ('amp', 'amp_all.csv', 'amp_control.csv', 'avg_error_percent', 'desired_gain'))
+    for family, original, control, column, key in pairs:
+        original_path = os.path.join(campaign_dir, original)
+        control_path = os.path.join(control_dir, control)
+        if not (os.path.exists(original_path) and os.path.exists(control_path)):
+            print(f'  {family}: needs {original} and {control}; skipped')
+            continue
+
+        campaign_rows = load(original_path)
+        control_rows = load(control_path)
+        populations = set(r['population'] for r in control_rows)
+        variants = set(r['variant'] for r in control_rows)
+        print(f'\n  {family}: control is variant {sorted(variants)} at population '
+              f'{sorted(populations)}, {len(control_rows)} runs')
+
+        low, high, control_by = {}, {}, collections.defaultdict(list)
+        for row in campaign_rows:
+            (low if row['variant'] == '4R' else high).setdefault(row[key], []).append(
+                float(row[column]))
+        for row in control_rows:
+            control_by[row[key]].append(float(row[column]))
+
+        header = (f"    {'cell':<18}{'4R base':>10}{'4R matched':>12}{'8R':>10}"
+                  f"{'budget':>9}{'resolution':>12}{'p(Holm)':>10}{'delta':>8}")
+        print(header)
+        print('    ' + '-' * (len(header) - 4))
+        cells, pvalues = [], []
+        for cell in sorted(control_by, key=_cell_order):
+            matched = np.array(control_by[cell])
+            better = np.array(high[cell])
+            _, p = stats.mannwhitneyu(better, matched, alternative='two-sided')
+            pvalues.append(p)
+            cells.append((cell, np.array(low[cell]), matched, better))
+        for (cell, base, matched, better), p in zip(cells, holm(pvalues)):
+            print(f'    {cell:<18}{np.median(base):>10.4f}{np.median(matched):>12.4f}'
+                  f'{np.median(better):>10.4f}'
+                  f'{np.median(base) / np.median(matched):>8.2f}x'
+                  f'{np.median(matched) / np.median(better):>11.2f}x'
+                  f'{p:>10.2e}{cliffs_delta(matched, better):>8.3f}')
+
+        pooled_base = np.concatenate([b for _, b, _, _ in cells])
+        pooled_matched = np.concatenate([m for _, _, m, _ in cells])
+        pooled_better = np.concatenate([h for _, _, _, h in cells])
+        _, p = stats.mannwhitneyu(pooled_better, pooled_matched, alternative='less')
+        print(f'\n    pooled: 4R base {np.median(pooled_base):.4f} | '
+              f'4R matched {np.median(pooled_matched):.4f} | 8R {np.median(pooled_better):.4f}')
+        print(f'      the extra budget alone is worth '
+              f'{np.median(pooled_base) / np.median(pooled_matched):.2f}x')
+        print(f'      resolution at matched budget is worth '
+              f'{np.median(pooled_matched) / np.median(pooled_better):.2f}x, '
+              f'one-sided p = {p:.2e}')
+        print(f'      unmatched, the two together read as '
+              f'{np.median(pooled_base) / np.median(pooled_better):.2f}x')
+
+
+def consistency_versus_baseline(campaign_dir: str, control_dir: str) -> None:
+    """Which of the two designs is erratic across cells -- the GA or the analytical one.
+
+    A per-cell median comparison answers "who wins here", which turns out to be the
+    wrong question: the analytical design's quality swings by nearly an order of
+    magnitude depending on where the ideal resistors happen to land relative to the
+    tap grid, while the GA's varies far less. The spread is the result.
+    """
+    baseline_path = os.path.join(campaign_dir, 'baseline.csv')
+    control_path = os.path.join(control_dir, 'filter_control.csv')
+    if not (os.path.exists(baseline_path) and os.path.exists(control_path)):
+        print('\n== Spread across cells ==\n  baseline.csv or filter_control.csv absent')
+        return
+
+    baseline = {}
+    for row in load(baseline_path):
+        if '8r' not in row['ckt_name']:
+            baseline[row['response']] = float(row['rmse_db'])
+    control = collections.defaultdict(list)
+    for row in load(control_path):
+        control[row['target']].append(float(row['rmse_db']))
+
+    targets = [f'{f}_{c}' for f in FAMILIES for c in CUTOFFS]
+    analytical = np.array([baseline[t] for t in targets])
+    medians = np.array([np.median(control[t]) for t in targets])
+    bests = np.array([min(control[t]) for t in targets])
+
+    print('\n== Spread across cells: who is erratic, the GA or the analytical design ==')
+    for label, values in (('analytical design', analytical),
+                          ('GA median', medians), ('GA best', bests)):
+        print(f'  {label:<20} {values.min():.4f} to {values.max():.4f} dB '
+              f'({values.max() / values.min():.1f}x spread, CV '
+              f'{values.std(ddof=1) / values.mean():.2f})')
+    print(f'  GA best beats the analytical design in {(bests < analytical).sum()}/'
+          f'{len(targets)} cells, GA median in {(medians < analytical).sum()}/{len(targets)}')
+    # If the GA wins exactly where the analytical design lands badly, its apparent
+    # advantage is a property of the baseline, not of the GA.
+    correlation = np.corrcoef(analytical, analytical / medians)[0, 1]
+    print(f'  correlation between the analytical error and the GA\'s advantage over it: '
+          f'r = {correlation:+.3f}')
+
+
 def cost(filter_rows: list, amp_rows: list) -> None:
     print('\n== Cost ==')
     rows = filter_rows + amp_rows
@@ -300,6 +433,8 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--dir', default=CAMPAIGN_DIR,
                         help='directory holding filter_all.csv, amp_all.csv, baseline.csv')
+    parser.add_argument('--control-dir', default=CONTROL_DIR,
+                        help='directory holding the matched-budget control CSVs')
     args = parser.parse_args()
 
     filter_rows = load(os.path.join(args.dir, 'filter_all.csv'))
@@ -312,6 +447,8 @@ def main() -> None:
     versus_baseline(by, os.path.join(args.dir, 'baseline.csv'))
     cutoff_accuracy(filter_rows)
     amplifier(amp_rows)
+    matched_budget(args.dir, args.control_dir)
+    consistency_versus_baseline(args.dir, args.control_dir)
     cost(filter_rows, amp_rows)
 
 
