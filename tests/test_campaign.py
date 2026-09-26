@@ -5,16 +5,20 @@ import campaign
 FAMILIES = ('filter', 'amp')
 
 
-def _jobs(**kwargs):
-    """Build the job list the way run() does, without running anything."""
-    defaults = dict(family='filter', seeds=2, out_dir='out', patience=None,
-                    population=None, variants=campaign.VARIANTS)
-    defaults.update(kwargs)
-    return [(defaults['family'], variant, target, seed, defaults['out_dir'],
-             defaults['patience'], defaults['population'])
-            for variant in defaults['variants']
-            for target in campaign.targets_of(defaults['family'])
-            for seed in range(1, defaults['seeds'] + 1)]
+def _jobs(family='filter', seeds=2, **kwargs):
+    """The real job list, so these tests cannot drift from what run() builds."""
+    return campaign.job_list(family, seeds, 'out', None, **kwargs)
+
+
+def test_the_job_tuple_matches_what_the_worker_unpacks():
+    """The tuple is positional, so a field added to one side must reach the other."""
+    import inspect
+
+    job = _jobs()[0]
+    source = inspect.getsource(campaign._run_one)
+    unpacked = source.split('= job')[0].split('    ')[-1]
+
+    assert len(unpacked.split(',')) == len(job)
 
 
 @pytest.mark.parametrize('family', FAMILIES)
@@ -30,7 +34,7 @@ def test_variant_selection_narrows_the_job_list_to_one_realization(family):
 def test_population_override_reaches_every_job(family):
     jobs = _jobs(family=family, population=40)
 
-    assert all(job[6] == 40 for job in jobs)
+    assert all(job[6] == 40 for job in jobs)   # population slot
 
 
 @pytest.mark.parametrize('family', FAMILIES)

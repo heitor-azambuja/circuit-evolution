@@ -68,6 +68,14 @@ Note the constraint it encodes: a unity-gain Sallen-Key stage can only reach `Q 
 ### filter_evaluation.py
 The frequency-domain objective: weighted RMS error in dB between the AC sweep's |H(f)| and the target curve from `scipy.signal`. Passband error is weighted above stopband error, and both curves are floored at −80 dB so the deep stopband — where the ideal response reaches −160 dB — cannot dominate the error.
 
+Its cutoff metrics report two frequencies, not one: `cutoff_realized_hz` is where the
+simulated response crosses −3 dB, and `cutoff_reference_hz` is where the *ideal*
+target response crosses it. `cutoff_error_percent` is the difference between them.
+Measuring against the nominal `cutoff_hz` instead would be wrong for a Chebyshev I,
+whose nominal cutoff is the ripple-band edge — the ideal response's own −3 dB point
+sits about 10% above it at order 4 and 0.5 dB ripple, so an exactly correct filter
+would read as 10% off.
+
 ### filter_targets.py
 The filter specification: every target is one (response family, cutoff) pair, and
 the cutoff sweep — 1000, 1500, 2000, 3000 Hz — is the filter's analogue of the
@@ -135,6 +143,14 @@ RESULTS=results-control FAMILIES=amp \
 
 Or `FAMILIES="filter amp"` for both in one go — they write separate CSVs.
 
+`--generations` overrides the other half of the budget, and `--target` (repeatable)
+narrows the campaign to particular cells, which is what a focused measurement needs:
+
+```bash
+python3 campaign.py --family filter --variant 4R --population 40 --generations 800 \
+    --target butterworth_1000 --seeds 40 --data-csv gen800.csv --out-dir gen800
+```
+
 Every row records the population it ran with, so a control and the original campaign
 stay distinguishable inside the CSV. Keep them in separate output directories
 though: fitness history filenames are built from circuit, target and seed only, so a
@@ -161,10 +177,25 @@ resolution with search budget until a matched-budget control is run.
 Two measurement notes it encodes. The variants are *independent* samples, not
 paired — the same seed drives a 4-gene and an 8-gene GA, whose populations are
 unrelated — so it uses Mann-Whitney with a Holm correction, not a paired test. And
-it re-derives cutoff error against the ideal response's own -3 dB point, because
-the CSV's `cutoff_error_percent` compares against the nominal cutoff, which for
-Chebyshev I is the ripple-band edge and sits about 10% below -3 dB even in the
-ideal filter.
+it re-derives cutoff error rather than reading the CSV's `cutoff_error_percent`,
+which lets it analyse runs recorded before that column was corrected. It measures
+the ideal response's -3 dB point **on the sweep grid**, the same coarse grid and log
+interpolation the realized crossing came from: reading a crossing off 20 points per
+decade is biased by up to 0.8%, and only a same-grid comparison cancels it.
+
+It also reports the matched-budget control (`simulations/control/`) when present,
+separating what the extra search budget bought from what the extra resistor
+resolution bought, and the spread of the analytical design across cells against the
+spread of the GA's.
+
+### filter_optimum.py — all eight cells
+
+Enumerating every cell (`python3 filter_optimum.py --out simulations/optima_4r.json`)
+gives the true ceiling for the 4R variant, which is what turns "the GA beat the
+analytical design" into a statement with a scale. It also checks itself: for the same
+taps, the enumeration computes the cascade as the product of two separately simulated
+stages while a GA run simulates the whole netlist at once, and the two agree to about
+1e-6 relative — the separability the whole method rests on.
 
 ### amp_design.py
 The amplifier's analytical design equations, the counterpart of `filter_design`.
