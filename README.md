@@ -188,6 +188,28 @@ separating what the extra search budget bought from what the extra resistor
 resolution bought, and the spread of the analytical design across cells against the
 spread of the GA's.
 
+### plot_paper.py
+The paper's figures, drawn from the same CSVs `analyze_campaign.py` summarises so a
+figure cannot disagree with the table it illustrates. Output lands in
+`simulations/figures/` as both PNG and PDF:
+
+```bash
+python3 plot_paper.py                  # all six
+python3 plot_paper.py --only lottery   # one
+```
+
+`lottery` (GA distribution vs the single analytical design vs the enumerated
+optimum, per specification), `bestofn` (how many independent runs it takes to beat
+the analytical design), `bode` (the response itself, with a passband inset),
+`amplifier` (the bimodal error distribution), `asymmetry` (what reordering R1 and R2
+recovers for free) and `budget` (search budget separated from resistor resolution).
+Four read only CSVs; `bode` and `asymmetry` call ngspice, because they draw
+responses rather than summarise recorded runs.
+
+`median_best_of_n` there computes the median of the best of *n* draws exactly, from
+the binomial tail, instead of resampling — the figure is the measured distribution
+rather than a sample from it.
+
 ### filter_optimum.py — all eight cells
 
 Enumerating every cell (`python3 filter_optimum.py --out simulations/optima_4r.json`)
