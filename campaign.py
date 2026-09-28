@@ -100,12 +100,13 @@ def baseline_taps(family: str, variant: str, target) -> list:
 
 
 def _run_one(job) -> dict:
-    family, variant, target, seed, out_dir, patience, population = job
+    family, variant, target, seed, out_dir, patience, population, generations = job
 
     import evolution_common
     spec = _module(family, variant).SPEC
     run = evolution_common.EvolutionRun(spec, target=target, exec_counter=seed, seed=seed)
-    data = run.evolve(spec.default_generations, population or spec.default_population,
+    data = run.evolve(generations or spec.default_generations,
+                      population or spec.default_population,
                       auto_plots=False, out_dir=out_dir, patience=patience)
 
     # One extra evaluation buys every result metric for the winning solution.
@@ -123,14 +124,28 @@ def _run_one(job) -> dict:
     return data
 
 
+def job_list(family: str, seeds: int, out_dir: str, patience, variants: tuple = VARIANTS,
+             population: int = None, generations: int = None,
+             targets: tuple = None) -> list:
+    """Every run this campaign will perform, in the order --shard partitions.
+
+    Separate from `run` so it can be inspected without starting a pool -- the job
+    tuple is positional and `_run_one` unpacks it, so the two have to agree.
+    """
+    return [(family, variant, target, seed, out_dir, patience, population, generations)
+            for variant in variants
+            for target in (targets or targets_of(family))
+            for seed in range(1, seeds + 1)]
+
+
 def run(family: str, seeds: int, out_dir: str, workers: int, patience,
         data_csv: str, shard: tuple, variants: tuple = VARIANTS,
-        population: int = None) -> list:
+        population: int = None, generations: int = None,
+        targets: tuple = None) -> list:
     import data_parse
 
-    jobs = [(family, variant, target, seed, out_dir, patience, population)
-            for variant in variants for target in targets_of(family)
-            for seed in range(1, seeds + 1)]
+    jobs = job_list(family, seeds, out_dir, patience, variants=variants,
+                    population=population, generations=generations, targets=targets)
     index, total = shard
     jobs = jobs[index - 1::total]
 
@@ -170,7 +185,7 @@ def summarize(family: str, results: list) -> None:
 
 
 def warn_about_history_collisions(family: str, variants: tuple, out_dir: str,
-                                  population: int) -> list:
+                                  population: int, targets: tuple = None) -> list:
     """Warn when a re-run would overwrite fitness histories already in `out_dir`.
 
     The per-run history filename is built from circuit, target and seed only -- not
@@ -192,7 +207,7 @@ def warn_about_history_collisions(family: str, variants: tuple, out_dir: str,
         spec = _module(family, variant).SPEC
         if population == spec.default_population:
             continue
-        for target in targets_of(family):
+        for target in (targets or targets_of(family)):
             slug = spec.evaluator.target_slug(target)
             pattern = os.path.join(
                 out_dir, f'fitness_history_{spec.circuit_name}_{slug}_execution*.json')
@@ -223,6 +238,11 @@ def main() -> None:
                         help='Override the population both variants would otherwise '
                              'take from their own spec (4R: 20, 8R: 40). Use it to '
                              'give the variants a matched search budget')
+    parser.add_argument('--generations', type=int,
+                        help='Override the generations taken from the spec (400). The '
+                             'other half of the search budget')
+    parser.add_argument('--target', action='append',
+                        help='Run only this target; repeat for several. Default: all')
     parser.add_argument('--patience', type=int, default=None,
                         help='Off by default, and it should stay off here')
     parser.add_argument('--out-dir', default='simulations')
@@ -238,12 +258,24 @@ def main() -> None:
     if args.population is not None and args.population < 4:
         parser.error('a population below 4 leaves nothing to mate')
 
+    if args.generations is not None and args.generations < 1:
+        parser.error('a campaign needs at least one generation')
+
     variants = tuple(dict.fromkeys(args.variant)) if args.variant else VARIANTS
-    warn_about_history_collisions(args.family, variants, args.out_dir, args.population)
+    known = targets_of(args.family)
+    targets = None
+    if args.target:
+        targets = tuple(dict.fromkeys(type(known[0])(t) for t in args.target))
+        unknown = [t for t in targets if t not in known]
+        if unknown:
+            parser.error(f'unknown {args.family} target(s): {unknown}')
+    warn_about_history_collisions(args.family, variants, args.out_dir, args.population,
+                                 targets=targets)
 
     results = run(args.family, args.seeds, args.out_dir, args.workers,
                   args.patience, args.data_csv, (index, total),
-                  variants=variants, population=args.population)
+                  variants=variants, population=args.population,
+                  generations=args.generations, targets=targets)
     summarize(args.family, results)
 
 

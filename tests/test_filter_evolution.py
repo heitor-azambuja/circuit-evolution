@@ -340,3 +340,36 @@ def test_ideal_resistors_shrink_as_the_cutoff_rises():
 
     for a, b in zip(low, high):
         assert b == pytest.approx(a / 3.0, rel=1e-6)
+
+
+def test_cutoff_error_is_measured_against_the_ideal_response_not_the_nominal_cutoff():
+    """A Chebyshev's nominal cutoff is the ripple-band edge, not its -3 dB point.
+
+    For order 4 at 0.5 dB ripple the ideal response's own -3 dB point sits about 10%
+    above the nominal cutoff, so measuring a realized -3 dB crossing against the
+    nominal figure reports that offset as error -- for a filter that is exactly
+    right. This is what made every Chebyshev cell of the campaign, the analytical
+    baseline included, read as ~10% off.
+    """
+    evaluator = _evaluator()
+
+    for target, expected_offset_percent in (('butterworth', 0.0), ('chebyshev', 10.2)):
+        metrics = evaluator.metrics(_exact_filter(target), [1e3] * 4, target)
+        reference = metrics['cutoff_reference_hz']
+        realized = metrics['cutoff_realized_hz']
+
+        # The ideal response's -3 dB point, which is where the exact filter lands.
+        assert reference / FC - 1 == pytest.approx(expected_offset_percent / 100, abs=0.01)
+        assert realized == pytest.approx(reference, rel=1e-9)
+
+        # The reported error is against that point, so an exact filter reads as zero
+        # in both families -- which the nominal-cutoff version could not do.
+        fields = evaluator.metric_fields(metrics)
+        assert fields['cutoff_error_percent'] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_cutoff_error_is_none_when_the_response_never_reaches_minus_three_db():
+    evaluator = _evaluator()
+    metrics = evaluator.metrics(_FakeFilter([1.0], [1.0]), [1e3] * 4, 'butterworth')
+
+    assert evaluator.metric_fields(metrics)['cutoff_error_percent'] is None
