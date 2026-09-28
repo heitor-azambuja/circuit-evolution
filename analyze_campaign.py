@@ -443,11 +443,12 @@ def consistency_versus_baseline(campaign_dir: str, control_dir: str) -> None:
               f'{values.std(ddof=1) / values.mean():.2f})')
     print(f'  GA best beats the analytical design in {(bests < analytical).sum()}/'
           f'{len(targets)} cells, GA median in {(medians < analytical).sum()}/{len(targets)}')
-    # If the GA wins exactly where the analytical design lands badly, its apparent
-    # advantage is a property of the baseline, not of the GA.
-    correlation = np.corrcoef(analytical, analytical / medians)[0, 1]
-    print(f'  correlation between the analytical error and the GA\'s advantage over it: '
-          f'r = {correlation:+.3f}')
+    # Correlate the two errors, not an error against a ratio containing it: corr(b, b/m)
+    # is circular, and stays near +0.9 even when m is shuffled into meaninglessness.
+    pearson = np.corrcoef(analytical, medians)[0, 1]
+    rho, p = stats.spearmanr(analytical, medians)
+    print(f'  analytical error vs GA median error across cells: Pearson r = {pearson:+.3f}, '
+          f'Spearman rho = {rho:+.3f} (p = {p:.2f})')
 
 
 def cost(filter_rows: list, amp_rows: list) -> None:
