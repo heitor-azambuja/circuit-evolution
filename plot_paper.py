@@ -18,9 +18,14 @@ import csv
 import json
 import os
 
+import matplotlib
 import numpy as np
 
 import analyze_campaign as ac
+
+# IEEE PDF eXpress rejects Type 3 fonts, matplotlib's default in PDF output;
+# TrueType (42) embeds cleanly.
+matplotlib.rcParams['pdf.fonttype'] = 42
 
 CAMPAIGN_DIR = 'simulations/campaign'
 CONTROL_DIR = 'simulations/control'
@@ -82,31 +87,6 @@ def _save(fig, name: str, out_dir: str) -> str:
     return path
 
 
-def median_best_of_n(values, n: int) -> float:
-    """Median of the best of `n` runs drawn without replacement -- computed, not sampled.
-
-    For sorted observations v[0] <= ... <= v[N-1], a draw of size n has its minimum at
-    or above v[i] exactly when all n come from the N-i values at or after i, so
-
-        P(min >= v[i]) = C(N-i, n) / C(N, n)
-
-    and the median is the first v[i] whose probability of being met or beaten reaches
-    one half. Exact, and faster than resampling by orders of magnitude.
-    """
-    from math import comb
-
-    ordered = np.sort(np.asarray(values, dtype=float))
-    total = ordered.size
-    if n >= total:
-        return float(ordered[0])
-    denominator = comb(total, n)
-    for i in range(total):
-        # P(min <= v[i]) = 1 - P(all n drawn from strictly after i)
-        if 1.0 - comb(total - i - 1, n) / denominator >= 0.5:
-            return float(ordered[i])
-    return float(ordered[-1])
-
-
 def figure_lottery(out_dir: str = OUT_DIR) -> str:
     """The analytical design's quality swings between cells; the GA's does not.
 
@@ -123,13 +103,14 @@ def figure_lottery(out_dir: str = OUT_DIR) -> str:
     base = _baselines()
     optima = _optima()
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), sharey=True,
+    # Sized for the two-column width of the paper, so the fonts print at their size.
+    fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.3), sharey=True,
                              constrained_layout=True)
     positions = np.arange(len(TARGETS))
 
     for ax, data, variant, colour, title in (
-            (axes[0], control, '4R', C_GA4, '4R — one X9C103 per resistor'),
-            (axes[1], campaign8, '8R', C_GA8, '8R — X9C103 + X9C102 in series')):
+            (axes[0], control, '4R', C_GA4, '4R: one X9C103 per resistor'),
+            (axes[1], campaign8, '8R', C_GA8, '8R: X9C103 and X9C102 in series')):
         box = ax.boxplot([data[t] for t in TARGETS], positions=positions,
                          widths=0.55, patch_artist=True, showfliers=False,
                          medianprops=dict(color='white', linewidth=1.4),
@@ -157,10 +138,9 @@ def figure_lottery(out_dir: str = OUT_DIR) -> str:
     # analytical points are, and hiding the outlier hides the argument.
     handles, labels = axes[0].get_legend_handles_labels()
     box4, box8 = axes[0].patches[0], axes[1].patches[0]
-    fig.legend([box4, box8] + handles, ['GA, 4R (100 seeds)', 'GA, 8R (100 seeds)'] + labels,
+    # The message lives in the paper's caption; a title here would repeat it.
+    fig.legend([box4, box8] + handles, ['GA, 4R (100 runs)', 'GA, 8R (100 runs)'] + labels,
                loc='outside lower center', ncol=4, fontsize=9.5, frameon=False)
-    fig.suptitle('The analytical design swings between specifications; the GA does not',
-                 fontsize=12.5, fontweight='bold')
     return _save(fig, 'fig_lottery.png', out_dir)
 
 
@@ -178,7 +158,7 @@ def figure_bestofn(out_dir: str = OUT_DIR) -> str:
     optima = _optima()
     counts = list(range(1, 21))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.3), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.1), constrained_layout=True)
 
     ax = axes[0]
     # Blues for Butterworth, greens for Chebyshev: red is reserved for the analytical
@@ -188,7 +168,7 @@ def figure_bestofn(out_dir: str = OUT_DIR) -> str:
     for index, target in enumerate(TARGETS):
         family = index // len(CUTOFFS)
         colour = (blues if family == 0 else greens)[index % len(CUTOFFS)]
-        ratios = [median_best_of_n(control[target], n) / base[(target, '4R')]
+        ratios = [ac.median_best_of_n(control[target], n) / base[(target, '4R')]
                   for n in counts]
         ax.plot(counts, ratios, '-' if family == 0 else '--', linewidth=1.6,
                 color=colour, label=_label(target).replace('\n', ' '))
@@ -202,14 +182,13 @@ def figure_bestofn(out_dir: str = OUT_DIR) -> str:
     ax.set_ylim(top=2.6)
     ax.grid(True, which='both', linestyle=':', alpha=0.5)
     ax.legend(fontsize=7.5, ncol=2, loc='lower left', framealpha=0.95)
-    ax.set_title('below the red line, the GA wins', fontsize=11)
 
     ax = axes[1]
     wins, ratio_mid = [], []
     for n in counts:
         won, ratios = 0, []
         for target in TARGETS:
-            median = median_best_of_n(control[target], n)
+            median = ac.median_best_of_n(control[target], n)
             won += median < base[(target, '4R')]
             ratios.append(median / optima[target]['optimum_rmse_db'])
         wins.append(won)
@@ -234,7 +213,6 @@ def figure_bestofn(out_dir: str = OUT_DIR) -> str:
     twin.set_ylabel('median × the global optimum', fontsize=10.5, color='#8c564b')
     twin.tick_params(axis='y', colors='#8c564b')
     twin.set_ylim(bottom=1.0)
-    ax.set_title('ten runs win every specification', fontsize=11)
     return _save(fig, 'fig_bestofn.png', out_dir)
 
 
@@ -258,17 +236,20 @@ def figure_bode(out_dir: str = OUT_DIR, target: str = 'chebyshev_3000') -> str:
         spec.setup_hook(circuit, target)
         return spec.evaluator.metrics(circuit, spec.resistor_mapper(taps), target)
 
-    def best_taps(path, variant):
-        rows = [r for r in _load(path)
-                if r['target'] == target and r['variant'] == variant]
-        best = min(rows, key=lambda r: float(r['rmse_db']))
-        return json.loads(best['solution'])
+    def median_taps(path, variant):
+        # The median run, not the best: the best of 100 would flatter the GA, and
+        # the median is what one run typically delivers. With an even count this
+        # is the lower of the two middle runs, so it is a run that actually exists.
+        rows = sorted((r for r in _load(path)
+                       if r['target'] == target and r['variant'] == variant),
+                      key=lambda r: float(r['rmse_db']))
+        return json.loads(rows[(len(rows) - 1) // 2]['solution'])
 
-    ga4 = response(sk4, best_taps(os.path.join(CONTROL_DIR, 'filter_control.csv'), '4R'))
-    ga8 = response(sk8, best_taps(os.path.join(CAMPAIGN_DIR, 'filter_all.csv'), '8R'))
+    ga4 = response(sk4, median_taps(os.path.join(CONTROL_DIR, 'filter_control.csv'), '4R'))
+    ga8 = response(sk8, median_taps(os.path.join(CAMPAIGN_DIR, 'filter_all.csv'), '8R'))
     analytical = response(sk4, filter_baseline.design(sk4, target)['taps'])
 
-    fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.0), sharex=True,
+    fig, axes = plt.subplots(2, 1, figsize=(4.8, 3.7), sharex=True,
                              gridspec_kw={'height_ratios': [3, 1.4]},
                              constrained_layout=True)
     freqs = ga8['freqs']
@@ -280,9 +261,9 @@ def figure_bode(out_dir: str = OUT_DIR, target: str = 'chebyshev_3000') -> str:
     ax.semilogx(freqs, analytical['response_db'], color=C_ANALYTICAL, linewidth=1.5,
                 label=f"analytical, 4R ({analytical['rmse_db']:.4f} dB)", zorder=3)
     ax.semilogx(freqs, ga4['response_db'], color=C_GA4, linewidth=1.5,
-                label=f"GA, 4R ({ga4['rmse_db']:.4f} dB)", zorder=4)
+                label=f"GA median run, 4R ({ga4['rmse_db']:.4f} dB)", zorder=4)
     ax.semilogx(freqs, ga8['response_db'], color=C_GA8, linewidth=1.5,
-                label=f"GA, 8R ({ga8['rmse_db']:.4f} dB)", zorder=5)
+                label=f"GA median run, 8R ({ga8['rmse_db']:.4f} dB)", zorder=5)
     ax.set_ylabel('|H(f)| [dB]', fontsize=11)
     ax.set_ylim(-90, 5)
     ax.legend(fontsize=8.5, loc='lower left')
@@ -310,7 +291,7 @@ def figure_bode(out_dir: str = OUT_DIR, target: str = 'chebyshev_3000') -> str:
     inset.set_xticks([t * cutoff for t in ticks])
     inset.set_xticklabels([f'{t * cutoff / 1000:g}k' for t in ticks])
     inset.set_xticks([], minor=True)
-    inset.tick_params(labelsize=7)
+    inset.tick_params(labelsize=8)
     inset.text(0.03, 0.06, 'passband and corner', transform=inset.transAxes,
                fontsize=8, va='bottom')
 
@@ -336,42 +317,42 @@ def figure_amplifier(out_dir: str = OUT_DIR) -> str:
     """
     import matplotlib.pyplot as plt
 
-    campaign = collections.defaultdict(list)
-    for row in _load(os.path.join(CAMPAIGN_DIR, 'amp_all.csv')):
-        campaign[(int(float(row['desired_gain'])), row['variant'])].append(
-            float(row['avg_error_percent']))
-    control = collections.defaultdict(list)
+    # Both variants at population 40, the same search budget: 4R from the matched
+    # re-run, 8R from the campaign.
+    runs = collections.defaultdict(list)
     for row in _load(os.path.join(CONTROL_DIR, 'amp_control.csv')):
-        control[int(float(row['desired_gain']))].append(float(row['avg_error_percent']))
+        runs[(int(float(row['desired_gain'])), '4R')].append(float(row['avg_error_percent']))
+    for row in _load(os.path.join(CAMPAIGN_DIR, 'amp_all.csv')):
+        if row['variant'] == '8R':
+            runs[(int(float(row['desired_gain'])), '8R')].append(
+                float(row['avg_error_percent']))
 
-    fig, ax = plt.subplots(figsize=(8.4, 4.6), constrained_layout=True)
+    import campaign as campaign_module
+
+    def analytical_error(variant, gain):
+        spec = campaign_module._module('amp', variant).SPEC
+        circuit = spec.circuit_factory()
+        spec.setup_hook(circuit, gain)
+        taps = campaign_module.baseline_taps('amp', variant, gain)
+        return spec.evaluator.metrics(circuit, spec.resistor_mapper(taps), gain)['avg_error_percent']
+
+    fig, ax = plt.subplots(figsize=(5.4, 3.5), constrained_layout=True)
     rng = np.random.default_rng(1)
-    arms = (('4R', C_GA4, -0.26), ('4R @ pop 40', C_GA4, 0.0), ('8R', C_GA8, 0.26))
+    arms = (('4R', C_GA4, -0.18), ('8R', C_GA8, 0.18))
 
     for index, gain in enumerate(GAINS):
-        series = (campaign[(gain, '4R')], control[gain], campaign[(gain, '8R')])
-        for (name, colour, offset), values in zip(arms, series):
-            values = np.array(values)
+        for name, colour, offset in arms:
+            values = np.array(runs[(gain, name)])
             jitter = rng.uniform(-0.075, 0.075, values.size)
             ax.scatter(index + offset + jitter, values, s=7, alpha=0.45,
                        color=colour, edgecolors='none',
-                       marker='o' if 'pop' not in name else '^',
                        label=name if index == 0 else None)
             ax.plot([index + offset - 0.1, index + offset + 0.1],
                     [np.median(values)] * 2, color='black', linewidth=1.6, zorder=5)
-
-    # The analytical design, which every one of the 800 runs beats.
-    import campaign as campaign_module
-    analytical = []
-    for gain in GAINS:
-        spec = campaign_module._module('amp', '4R').SPEC
-        circuit = spec.circuit_factory()
-        spec.setup_hook(circuit, gain)
-        taps = campaign_module.baseline_taps('amp', '4R', gain)
-        analytical.append(spec.evaluator.metrics(
-            circuit, spec.resistor_mapper(taps), gain)['avg_error_percent'])
-    ax.scatter(range(len(GAINS)), analytical, marker='D', s=52, color=C_ANALYTICAL,
-               zorder=6, edgecolor='white', linewidth=0.7, label='analytical design')
+            # Each variant against its own analytical design, which every run beats.
+            ax.scatter(index + offset, analytical_error(name, gain), marker='D', s=52,
+                       color=C_ANALYTICAL, zorder=6, edgecolor='white', linewidth=0.7,
+                       label='analytical design' if index == 0 and name == '4R' else None)
 
     ax.set_xticks(range(len(GAINS)))
     ax.set_xticklabels([f'gain {g}' for g in GAINS], fontsize=10)
@@ -379,18 +360,18 @@ def figure_amplifier(out_dir: str = OUT_DIR) -> str:
     ax.grid(True, axis='y', linestyle=':', alpha=0.5)
     ax.set_ylim(0.5, 15.5)
     # Name the two regimes: the whole point is that they are regimes, not a spread.
-    ax.annotate('local optimum:\nwrong bias point', xy=(0.74, 9.0), xytext=(0.36, 6.2),
-                fontsize=8.5, color='#444444', ha='center',
+    ax.annotate('local optimum:\nshifted bias point', xy=(0.82, 9.0), xytext=(0.45, 6.2),
+                fontsize=9, color='#444444', ha='center',
                 arrowprops=dict(arrowstyle='->', color='#888888', linewidth=1.1))
-    ax.annotate('floor set by the small-signal model,\nwhich no resistor resolution moves',
-                xy=(1.74, 3.45), xytext=(2.15, 5.9), fontsize=8.5, color='#444444',
+    ax.annotate('floor unchanged by\nresistor resolution',
+                xy=(1.82, 3.45), xytext=(2.2, 5.9), fontsize=9, color='#444444',
                 ha='center',
                 arrowprops=dict(arrowstyle='->', color='#888888', linewidth=1.1))
     handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc='outside lower center', ncol=4, fontsize=9.5,
+    order = [labels.index(name) for name in ('4R', '8R', 'analytical design')]
+    fig.legend([handles[i] for i in order], [labels[i] for i in order],
+               loc='outside lower center', ncol=3, fontsize=9.5,
                markerscale=1.8, frameon=False)
-    ax.set_title('Every run lands on a floor or in a trap — and every run beats the '
-                 'analytical design', fontsize=11, fontweight='bold')
     return _save(fig, 'fig_amplifier.png', out_dir)
 
 
